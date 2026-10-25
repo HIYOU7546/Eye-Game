@@ -14,24 +14,36 @@ public class EyeDistanceTargetLocker : MonoBehaviour
     public Transform leftEyeTarget;
     public Transform rightEyeTarget;
 
+    [Header("Auto-Focus / Raycast Settings")]
+    [Tooltip("LayerMask to filter what the eyes can focus on.")]
+    public LayerMask focusLayerMask = ~0;
+    [Tooltip("Maximum distance to search for a surface to look at.")]
+    public float maxFocusDistance = 50.0f;
+    [Tooltip("Smoothing speed for moving the targets to the hit point.")]
+    public float targetMoveSpeed = 10.0f;
+
     [Header("State Control Overrides")]
     [Tooltip("Uncheck this if the Left Eye gets blinded, knocked out, or controlled by an external source.")]
     public bool leftEyeControlledByPlayer = true;
-    
     [Tooltip("Uncheck this if the Right Eye gets blinded, knocked out, or controlled by an external source.")]
     public bool rightEyeControlledByPlayer = true;
 
     [Header("Distance Thresholds (Eye-to-Eye)")]
     [Tooltip("When eye distance is less than this, targets are locked together.")]
     public float lockThreshold = 2.0f;
-    
-    [Tooltip("When eye distance is greater than this, targets unlock completely.")]
+    [Tooltip("When eye distance is greater than this, unlocks completely.")]
     public float unlockThreshold = 5.0f;
 
     [Header("Movement Settings")]
     public float lookSpeed = 12.0f;
 
     private bool isCurrentlyLocked = true;
+
+    [Header("Debug Settings")]
+    [Tooltip("Color of the raycast lines in the scene view.")]
+    public bool enableDebug = true;
+    public Color debugRayColor = Color.green;
+
 
     void LateUpdate()
     {
@@ -42,10 +54,13 @@ public class EyeDistanceTargetLocker : MonoBehaviour
         leftCamera.position = leftEyeball.position;
         rightCamera.position = rightEyeball.position;
 
-        // 2. Measure the physical distance between the EYE OBJECTS themselves
+        // 2. Perform auto-focus raycast using the midpoint or average camera view
+        UpdateAutoTargets();
+
+        // 3. Measure the physical distance between the EYE OBJECTS themselves
         float eyeDistance = Vector3.Distance(leftEyeball.position, rightEyeball.position);
 
-        // 3. Evaluate the locking state machine based on eye distance
+        // 4. Evaluate the locking state machine based on eye distance
         if (eyeDistance <= lockThreshold)
         {
             isCurrentlyLocked = true;
@@ -55,7 +70,7 @@ public class EyeDistanceTargetLocker : MonoBehaviour
             isCurrentlyLocked = false;
         }
 
-        // 4. Determine look targets independently based on active controls
+        // 5. Determine look targets independently based on active controls
         Vector3 finalLeftLookTarget = leftEyeTarget.position;
         Vector3 finalRightLookTarget = rightEyeTarget.position;
 
@@ -64,7 +79,6 @@ public class EyeDistanceTargetLocker : MonoBehaviour
         {
             // Find the central midpoint between the two active user targets
             Vector3 sharedCenterPoint = (leftEyeTarget.position + rightEyeTarget.position) / 2f;
-
             finalLeftLookTarget = sharedCenterPoint;
             finalRightLookTarget = sharedCenterPoint;
 
@@ -73,7 +87,7 @@ public class EyeDistanceTargetLocker : MonoBehaviour
             rightEyeTarget.position = sharedCenterPoint;
         }
 
-        // 5. Compute vector angles and smoothly execute camera rotations ONLY if player has control
+        // 6. Compute vector angles and smoothly execute camera rotations ONLY if player has control
         if (leftEyeControlledByPlayer)
         {
             Quaternion targetLeftRot = Quaternion.LookRotation(finalLeftLookTarget - leftEyeball.position);
@@ -88,4 +102,42 @@ public class EyeDistanceTargetLocker : MonoBehaviour
             rightCamera.rotation = rightEyeball.rotation;
         }
     }
+
+    private void UpdateAutoTargets()
+    {
+        // Cast a ray from the center of the two cameras forward
+        Vector3 avgCameraPos = (leftCamera.position + rightCamera.position) / 2f;
+        Vector3 avgCameraForward = (leftCamera.forward + rightCamera.forward).normalized;
+
+        Ray ray = new Ray(avgCameraPos, avgCameraForward);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, maxFocusDistance, focusLayerMask))
+        {
+            Vector3 hitPoint = hit.point;
+
+            // DEBUG: Draws a solid line to the hit object and a small cross directly on the hit surface point
+            if (enableDebug)
+            {
+                Debug.DrawRay(ray.origin, ray.direction * hit.distance, debugRayColor);
+                Debug.DrawLine(hitPoint + Vector3.up * 0.1f, hitPoint + Vector3.down * 0.1f, Color.red);
+                Debug.DrawLine(hitPoint + Vector3.left * 0.1f, hitPoint + Vector3.right * 0.1f, Color.red);
+            }
+
+            // Smoothly move the targets toward what we hit
+            if (leftEyeControlledByPlayer)
+            {
+                leftEyeTarget.position = Vector3.Lerp(leftEyeTarget.position, hitPoint, Time.deltaTime * targetMoveSpeed);
+            }
+            if (rightEyeControlledByPlayer)
+            {
+                rightEyeTarget.position = Vector3.Lerp(rightEyeTarget.position, hitPoint, Time.deltaTime * targetMoveSpeed);
+            }
+        }
+        else
+        {
+            // DEBUG: Draws a full-length line in the air if nothing is being hit
+            Debug.DrawRay(ray.origin, ray.direction * maxFocusDistance, Color.yellow);
+        }
+    }
+
 }

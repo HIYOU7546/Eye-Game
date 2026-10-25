@@ -319,6 +319,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 824557124}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &550227292
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 550227293}
+  m_Layer: 0
+  m_Name: GameObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &550227293
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 550227292}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 431.50082, y: -227.80115, z: 174.30945}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &561875998
 GameObject:
   m_ObjectHideFlags: 0
@@ -941,9 +972,18 @@ MonoBehaviour:
   rightCamera: {fileID: 345605557}
   leftEyeTarget: {fileID: 1256037820}
   rightEyeTarget: {fileID: 1292299153}
-  maxIndependentDistance: 5
-  minConvergenceDistance: 0.5
+  focusLayerMask:
+    serializedVersion: 2
+    m_Bits: 21
+  maxFocusDistance: 50
+  targetMoveSpeed: 10
+  leftEyeControlledByPlayer: 1
+  rightEyeControlledByPlayer: 1
+  lockThreshold: 2
+  unlockThreshold: 5
   lookSpeed: 10
+  enableDebug: 1
+  debugRayColor: {r: 0, g: 1, b: 0, a: 1}
 --- !u!4 &1409411736
 Transform:
   m_ObjectHideFlags: 0
@@ -1191,3 +1231,4 @@ SceneRoots:
   - {fileID: 1578217357}
   - {fileID: 1409411736}
   - {fileID: 824557124}
+  - {fileID: 550227293}
