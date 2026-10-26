@@ -38,6 +38,7 @@ public class EyeDistanceTargetLocker : MonoBehaviour
     public float lookSpeed = 12.0f;
 
     private bool isCurrentlyLocked = true;
+    public bool IsLocked => isCurrentlyLocked;
 
     [Header("Debug Settings")]
     [Tooltip("Color of the raycast lines in the scene view.")]
@@ -105,6 +106,8 @@ public class EyeDistanceTargetLocker : MonoBehaviour
 
     private void UpdateAutoTargets()
     {
+        if (!isCurrentlyLocked) return;
+        
         // Cast a ray from the center of the two cameras forward
         Vector3 avgCameraPos = (leftCamera.position + rightCamera.position) / 2f;
         Vector3 avgCameraForward = (leftCamera.forward + rightCamera.forward).normalized;
