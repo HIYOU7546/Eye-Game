@@ -978,6 +978,9 @@ MonoBehaviour:
     m_Bits: 21
   maxFocusDistance: 50
   targetMoveSpeed: 10
+  independentAutoFocus: 1
+  leftEyeDebugColor: {r: 0, g: 1, b: 1, a: 1}
+  rightEyeDebugColor: {r: 1, g: 0, b: 1, a: 1}
   leftEyeControlledByPlayer: 1
   rightEyeControlledByPlayer: 1
   lockThreshold: 2
@@ -1021,6 +1024,12 @@ MonoBehaviour:
   independentLookSpeed: 80
   maxPitch: 80
   invertY: 0
+  moveTarget: {fileID: 0}
+  moveSpeed: 5
+  crouchTarget: {fileID: 0}
+  crouchSpeed: 2
+  crouchDepth: 0.5
+  crouchMoveMultiplier: 0.5
   activeEye: 0
 --- !u!1 &1578217355
 GameObject:

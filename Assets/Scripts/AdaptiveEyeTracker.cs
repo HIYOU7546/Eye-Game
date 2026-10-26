@@ -21,6 +21,10 @@ public class EyeDistanceTargetLocker : MonoBehaviour
     public float maxFocusDistance = 50.0f;
     [Tooltip("Smoothing speed for moving the targets to the hit point.")]
     public float targetMoveSpeed = 10.0f;
+    [Tooltip("When the eyes are independent, each eye focuses on whatever it is looking at on its own.")]
+    public bool independentAutoFocus = true;
+    public Color leftEyeDebugColor = Color.cyan;
+    public Color rightEyeDebugColor = Color.magenta;
 
     [Header("State Control Overrides")]
     [Tooltip("Uncheck this if the Left Eye gets blinded, knocked out, or controlled by an external source.")]
@@ -106,8 +110,19 @@ public class EyeDistanceTargetLocker : MonoBehaviour
 
     private void UpdateAutoTargets()
     {
-        if (!isCurrentlyLocked) return;
-        
+        if (!isCurrentlyLocked)
+        {
+            // Eyes are apart: each eye focuses on its own
+            if (independentAutoFocus)
+            {
+                if (leftEyeControlledByPlayer)
+                    FocusSingleEye(leftEyeball, leftEyeTarget, leftEyeDebugColor);
+                if (rightEyeControlledByPlayer)
+                    FocusSingleEye(rightEyeball, rightEyeTarget, rightEyeDebugColor);
+            }
+            return;
+        }
+
         // Cast a ray from the center of the two cameras forward
         Vector3 avgCameraPos = (leftCamera.position + rightCamera.position) / 2f;
         Vector3 avgCameraForward = (leftCamera.forward + rightCamera.forward).normalized;
@@ -139,6 +154,33 @@ public class EyeDistanceTargetLocker : MonoBehaviour
         else
         {
             // DEBUG: Draws a full-length line in the air if nothing is being hit
+            Debug.DrawRay(ray.origin, ray.direction * maxFocusDistance, Color.yellow);
+        }
+    }
+
+    // Independent focus: the player's input decides the DIRECTION the eye looks (the target's angle),
+    // and the raycast along that direction decides the DEPTH (how far away the target sits).
+    private void FocusSingleEye(Transform eye, Transform target, Color debugColor)
+    {
+        Vector3 toTarget = target.position - eye.position;
+        if (toTarget.sqrMagnitude < 0.0001f) return;
+
+        Ray ray = new Ray(eye.position, toTarget.normalized);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, maxFocusDistance, focusLayerMask))
+        {
+            if (enableDebug)
+            {
+                Debug.DrawRay(ray.origin, ray.direction * hit.distance, debugColor);
+                Debug.DrawLine(hit.point + Vector3.up * 0.1f, hit.point + Vector3.down * 0.1f, Color.red);
+                Debug.DrawLine(hit.point + Vector3.left * 0.1f, hit.point + Vector3.right * 0.1f, Color.red);
+            }
+
+            // Slide the target along the eye's ray to the surface it hit
+            target.position = Vector3.Lerp(target.position, hit.point, Time.deltaTime * targetMoveSpeed);
+        }
+        else if (enableDebug)
+        {
             Debug.DrawRay(ray.origin, ray.direction * maxFocusDistance, Color.yellow);
         }
     }
