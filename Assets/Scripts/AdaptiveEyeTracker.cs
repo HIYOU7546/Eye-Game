@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public class EyeDistanceTargetLocker : MonoBehaviour
+public class AdaptiveEyeTracker : MonoBehaviour
 {
     [Header("Physical Eyeballs")]
     public Transform leftEyeball;
@@ -23,6 +23,10 @@ public class EyeDistanceTargetLocker : MonoBehaviour
     public float targetMoveSpeed = 10.0f;
     [Tooltip("When the eyes are independent, each eye focuses on whatever it is looking at on its own.")]
     public bool independentAutoFocus = true;
+    [Tooltip("Seconds of looking at nothing before the eyes settle on the default focus distance.")]
+    public float noHitDelay = 1.5f;
+    [Tooltip("How far away the eyes focus when there is nothing to look at.")]
+    public float defaultFocusDistance = 10f;
     public Color leftEyeDebugColor = Color.cyan;
     public Color rightEyeDebugColor = Color.magenta;
 
@@ -42,7 +46,20 @@ public class EyeDistanceTargetLocker : MonoBehaviour
     public float lookSpeed = 12.0f;
 
     private bool isCurrentlyLocked = true;
+    private float lockedMissTimer;
+    private float leftMissTimer;
+    private float rightMissTimer;
     public bool IsLocked => isCurrentlyLocked;
+
+    // Eyes that have been left somewhere else (e.g. in a jar). While any eye is parked the eyes stay independent.
+    private bool leftEyeParked;
+    private bool rightEyeParked;
+    public bool AnyEyeParked => leftEyeParked || rightEyeParked;
+    public bool IsEyeParked(bool left) => left ? leftEyeParked : rightEyeParked;
+    public void SetEyeParked(bool left, bool parked)
+    {
+        if (left) leftEyeParked = parked; else rightEyeParked = parked;
+    }
 
     [Header("Debug Settings")]
     [Tooltip("Color of the raycast lines in the scene view.")]
@@ -74,6 +91,10 @@ public class EyeDistanceTargetLocker : MonoBehaviour
         {
             isCurrentlyLocked = false;
         }
+
+        // An eye left in a jar always keeps the eyes independent, however close they are
+        if (AnyEyeParked)
+            isCurrentlyLocked = false;
 
         // 5. Determine look targets independently based on active controls
         Vector3 finalLeftLookTarget = leftEyeTarget.position;
@@ -113,15 +134,19 @@ public class EyeDistanceTargetLocker : MonoBehaviour
         if (!isCurrentlyLocked)
         {
             // Eyes are apart: each eye focuses on its own
+            lockedMissTimer = 0f;
             if (independentAutoFocus)
             {
                 if (leftEyeControlledByPlayer)
-                    FocusSingleEye(leftEyeball, leftEyeTarget, leftEyeDebugColor);
+                    FocusSingleEye(leftEyeball, leftEyeTarget, leftEyeDebugColor, ref leftMissTimer);
                 if (rightEyeControlledByPlayer)
-                    FocusSingleEye(rightEyeball, rightEyeTarget, rightEyeDebugColor);
+                    FocusSingleEye(rightEyeball, rightEyeTarget, rightEyeDebugColor, ref rightMissTimer);
             }
             return;
         }
+
+        leftMissTimer = 0f;
+        rightMissTimer = 0f;
 
         // Cast a ray from the center of the two cameras forward
         Vector3 avgCameraPos = (leftCamera.position + rightCamera.position) / 2f;
@@ -131,6 +156,7 @@ public class EyeDistanceTargetLocker : MonoBehaviour
 
         if (Physics.Raycast(ray, out RaycastHit hit, maxFocusDistance, focusLayerMask))
         {
+            lockedMissTimer = 0f;
             Vector3 hitPoint = hit.point;
 
             // DEBUG: Draws a solid line to the hit object and a small cross directly on the hit surface point
@@ -155,12 +181,23 @@ public class EyeDistanceTargetLocker : MonoBehaviour
         {
             // DEBUG: Draws a full-length line in the air if nothing is being hit
             Debug.DrawRay(ray.origin, ray.direction * maxFocusDistance, Color.yellow);
+
+            // Nothing hit: after a delay, drift to the default focus distance
+            lockedMissTimer += Time.deltaTime;
+            if (lockedMissTimer >= noHitDelay)
+            {
+                Vector3 defaultPoint = ray.origin + ray.direction * defaultFocusDistance;
+                if (leftEyeControlledByPlayer)
+                    leftEyeTarget.position = Vector3.Lerp(leftEyeTarget.position, defaultPoint, Time.deltaTime * targetMoveSpeed);
+                if (rightEyeControlledByPlayer)
+                    rightEyeTarget.position = Vector3.Lerp(rightEyeTarget.position, defaultPoint, Time.deltaTime * targetMoveSpeed);
+            }
         }
     }
 
     // Independent focus: the player's input decides the DIRECTION the eye looks (the target's angle),
     // and the raycast along that direction decides the DEPTH (how far away the target sits).
-    private void FocusSingleEye(Transform eye, Transform target, Color debugColor)
+    private void FocusSingleEye(Transform eye, Transform target, Color debugColor, ref float missTimer)
     {
         Vector3 toTarget = target.position - eye.position;
         if (toTarget.sqrMagnitude < 0.0001f) return;
@@ -169,6 +206,7 @@ public class EyeDistanceTargetLocker : MonoBehaviour
 
         if (Physics.Raycast(ray, out RaycastHit hit, maxFocusDistance, focusLayerMask))
         {
+            missTimer = 0f;
             if (enableDebug)
             {
                 Debug.DrawRay(ray.origin, ray.direction * hit.distance, debugColor);
@@ -179,9 +217,18 @@ public class EyeDistanceTargetLocker : MonoBehaviour
             // Slide the target along the eye's ray to the surface it hit
             target.position = Vector3.Lerp(target.position, hit.point, Time.deltaTime * targetMoveSpeed);
         }
-        else if (enableDebug)
+        else
         {
-            Debug.DrawRay(ray.origin, ray.direction * maxFocusDistance, Color.yellow);
+            if (enableDebug)
+                Debug.DrawRay(ray.origin, ray.direction * maxFocusDistance, Color.yellow);
+
+            // Nothing hit: after a delay, slide this eye's target to the default focus distance
+            missTimer += Time.deltaTime;
+            if (missTimer >= noHitDelay)
+            {
+                Vector3 defaultPoint = ray.origin + ray.direction * defaultFocusDistance;
+                target.position = Vector3.Lerp(target.position, defaultPoint, Time.deltaTime * targetMoveSpeed);
+            }
         }
     }
 

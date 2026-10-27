@@ -18,9 +18,13 @@ public class PlayerController : MonoBehaviour
     public Transform leftEyeTarget;
     public Transform rightEyeTarget;
 
+    [Header("Interaction")]
+    [Tooltip("Optional. Found automatically on this object if empty. Lets objects like the eye jar take over the bumpers.")]
+    public PlayerInteractor interactor;
+
     [Header("Eye System")]
-    [Tooltip("The EyeDistanceTargetLocker component. Used to know when the eyes are independent.")]
-    public EyeDistanceTargetLocker eyeTracker;
+    [Tooltip("The AdaptiveEyeTracker component. Used to know when the eyes are independent.")]
+    public AdaptiveEyeTracker eyeTracker;
 
     [Header("Look Variables")]
     [SerializeField] float lookSpeed = 100f;           // head rotation speed (eyes locked together)
@@ -52,9 +56,12 @@ public class PlayerController : MonoBehaviour
     public ActiveEye CurrentEye => activeEye;
 
     bool EyesIndependent => eyeTracker != null && !eyeTracker.IsLocked;
+    bool ActiveEyeParked => eyeTracker != null && eyeTracker.IsEyeParked(activeEye == ActiveEye.Left);
 
     void Awake()
     {
+        if (interactor == null) interactor = GetComponent<PlayerInteractor>();
+
         var actions = inputActions != null ? inputActions : InputSystem.actions;
         if (actions == null)
         {
@@ -123,10 +130,12 @@ public class PlayerController : MonoBehaviour
         // Stick up = look up. Positive pitch below means looking DOWN, so flip the sign.
         float yInput = invertY ? lookInput.y : -lookInput.y;
 
-        if (EyesIndependent)
-            SteerActiveEyeTarget(lookInput.x, yInput);
-        else
+        if (!EyesIndependent)
             RotateHead(lookInput.x, yInput);
+        else if (eyeTracker.AnyEyeParked && !ActiveEyeParked)
+            RotateHead(lookInput.x, yInput);   // controlling the eye still on the head: turn the head
+        else
+            SteerActiveEyeTarget(lookInput.x, yInput); // controlling a free or parked eye: move its target
     }
 
     // Left stick moves along the ground, relative to where the head is facing.
@@ -177,7 +186,17 @@ public class PlayerController : MonoBehaviour
     {
         Vector3 pivot = transform.position;
         if (eyeTracker != null && eyeTracker.leftEyeball != null && eyeTracker.rightEyeball != null)
-            pivot = (eyeTracker.leftEyeball.position + eyeTracker.rightEyeball.position) * 0.5f;
+        {
+            bool leftParked = eyeTracker.IsEyeParked(true);
+            bool rightParked = eyeTracker.IsEyeParked(false);
+
+            if (leftParked && !rightParked)
+                pivot = eyeTracker.rightEyeball.position;       // only the right eye is still on the head
+            else if (rightParked && !leftParked)
+                pivot = eyeTracker.leftEyeball.position;        // only the left eye is still on the head
+            else
+                pivot = (eyeTracker.leftEyeball.position + eyeTracker.rightEyeball.position) * 0.5f;
+        }
 
         // Yaw around world up so it never adds roll
         float yaw = xInput * lookSpeed * Time.deltaTime;
@@ -227,10 +246,15 @@ public class PlayerController : MonoBehaviour
 
     void OnSwitchEye(InputAction.CallbackContext context)
     {
-        // Debug.Log($"SwitchEye fired: {context.control.name}, independent: {EyesIndependent}");
-        if (!EyesIndependent) return;
-
         string controlName = context.control.name;
+
+        // If the object in front of you (e.g. the eye jar) wants this bumper, don't switch eyes
+        bool leftBumper = controlName == "leftShoulder" || controlName == "leftBumper";
+        bool rightBumper = controlName == "rightShoulder" || controlName == "rightBumper";
+        if ((leftBumper || rightBumper) && interactor != null /*&& interactor.ConsumesBumper(leftBumper)*/)
+            return;
+
+        if (!EyesIndependent) return;
 
         if (controlName == "leftShoulder" || controlName == "leftBumper")
         {
