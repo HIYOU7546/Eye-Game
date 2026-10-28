@@ -10,6 +10,8 @@ public class PlayerInteractor : MonoBehaviour
     public InputActionAsset inputActions;
     [Tooltip("Name of the button action in your Input Actions asset.")]
     public string interactActionName = "Interact";
+    [Tooltip("Name of the bumper action (needed so objects like the eye jar can use the bumpers).")]
+    public string switchEyeActionName = "Switch Eye";
 
     [Header("Detection")]
     [Tooltip("Where the check starts and which way is 'ahead'. Leave empty to use this object.")]
@@ -26,11 +28,14 @@ public class PlayerInteractor : MonoBehaviour
 
     [Header("Debug")]
     public bool showPromptOnScreen = true;
+    [Tooltip("Shows a small line in the top-left corner saying what you are currently targeting.")]
+    public bool debugStatus = true;
     public bool drawGizmo = true;
 
     public Interactable Current { get; private set; }
 
     InputAction interactAction;
+    InputAction switchEyeAction;
     readonly Collider[] hits = new Collider[32];
 
     Transform Origin => origin != null ? origin : transform;
@@ -44,6 +49,7 @@ public class PlayerInteractor : MonoBehaviour
             return;
         }
 
+        switchEyeAction = actions.FindAction(switchEyeActionName);
         interactAction = actions.FindAction(interactActionName);
         if (interactAction == null)
             Debug.LogWarning($"PlayerInteractor: action '{interactActionName}' not found.");
@@ -56,6 +62,10 @@ public class PlayerInteractor : MonoBehaviour
             interactAction.performed += OnInteract;
             interactAction.Enable();
         }
+
+        // PlayerController enables/disables this action; we only listen to it
+        if (switchEyeAction != null)
+            switchEyeAction.performed += OnBumperPressed;
     }
 
     void OnDisable()
@@ -66,12 +76,32 @@ public class PlayerInteractor : MonoBehaviour
             interactAction.Disable();
         }
 
+        if (switchEyeAction != null)
+            switchEyeAction.performed -= OnBumperPressed;
+
         SetCurrent(null);
     }
 
     void Update()
     {
         SetCurrent(FindBest());
+    }
+
+    // True when the focused object wants this bumper press (so it shouldn't switch eyes)
+    public bool ConsumesBumper(bool leftBumper)
+    {
+        return Current != null && Current.UsesBumper(this, leftBumper);
+    }
+
+    void OnBumperPressed(InputAction.CallbackContext ctx)
+    {
+        string n = ctx.control.name;
+        bool isLeft = n == "leftShoulder" || n == "leftBumper";
+        bool isRight = n == "rightShoulder" || n == "rightBumper";
+        if (!isLeft && !isRight) return;
+
+        if (Current != null && Current.UsesBumper(this, isLeft))
+            Current.OnBumper(this, isLeft);
     }
 
     void OnInteract(InputAction.CallbackContext ctx)
@@ -129,7 +159,13 @@ public class PlayerInteractor : MonoBehaviour
 
     void OnGUI()
     {
+        if (debugStatus)
+            GUI.Label(new Rect(10, 10, 600, 30), Current != null ? "Interact target: " + Current.name : "Interact target: none");
+
         if (!showPromptOnScreen || Current == null) return;
+
+        // objects can draw their own menu
+        if (Current.DrawPromptGUI(this)) return;
 
         var style = new GUIStyle(GUI.skin.label)
         {

@@ -22,7 +22,7 @@ public class Interactable : MonoBehaviour
     bool used;
     float nextUseTime;
 
-    public bool CanInteract => enabled && !(singleUse && used) && Time.time >= nextUseTime;
+    public virtual bool CanInteract => enabled && !(singleUse && used) && Time.time >= nextUseTime;
 
     public virtual void Interact(PlayerInteractor interactor)
     {
@@ -35,4 +35,15 @@ public class Interactable : MonoBehaviour
 
     public virtual void OnFocus() => onFocus?.Invoke();
     public virtual void OnUnfocus() => onUnfocus?.Invoke();
+
+    // ---- Optional hooks for interactables that use the bumpers and draw their own menu ----
+
+    // Return true if this object wants the given bumper press while it is focused
+    // (the press then does NOT switch which eye you control).
+    public virtual bool UsesBumper(PlayerInteractor interactor, bool leftBumper) => false;
+
+    public virtual void OnBumper(PlayerInteractor interactor, bool leftBumper) { }
+
+    // Draw a custom prompt/menu. Return true if you drew one (the default text prompt is then skipped).
+    public virtual bool DrawPromptGUI(PlayerInteractor interactor) => false;
 }

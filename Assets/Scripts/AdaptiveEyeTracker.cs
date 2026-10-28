@@ -45,6 +45,18 @@ public class AdaptiveEyeTracker : MonoBehaviour
     [Header("Movement Settings")]
     public float lookSpeed = 12.0f;
 
+    [Header("Half-Screen Offset (one eye away from the head)")]
+    [Tooltip("When only one eye is on the head it only fills half the screen. This turns its camera sideways so the CENTER OF ITS HALF is where you aim.")]
+    public bool offsetHeadEyeToHalfScreen = true;
+    [Tooltip("On = the left eye is shown on the left half of the screen (right eye on the right). Untick if yours is the other way round.")]
+    public bool leftEyeShowsLeftHalf = true;
+    [Tooltip("0 = work it out from the camera's field of view. Otherwise use this many degrees.")]
+    public float halfScreenOffsetDegrees = 0f;
+    [Tooltip("How quickly the offset eases in and out.")]
+    public float offsetBlendSpeed = 6f;
+    private float leftOffsetCurrent;
+    private float rightOffsetCurrent;
+
     private bool isCurrentlyLocked = true;
     private float lockedMissTimer;
     private float leftMissTimer;
@@ -55,6 +67,15 @@ public class AdaptiveEyeTracker : MonoBehaviour
     private bool leftEyeParked;
     private bool rightEyeParked;
     public bool AnyEyeParked => leftEyeParked || rightEyeParked;
+
+    // While an eye is flying between the head and a jar its auto-focus is paused, so the raycast can't
+    // drag its target onto whatever it passes through on the way.
+    private bool leftFocusSuspended;
+    private bool rightFocusSuspended;
+    public void SetFocusSuspended(bool left, bool suspended)
+    {
+        if (left) leftFocusSuspended = suspended; else rightFocusSuspended = suspended;
+    }
     public bool IsEyeParked(bool left) => left ? leftEyeParked : rightEyeParked;
     public void SetEyeParked(bool left, bool parked)
     {
@@ -92,8 +113,9 @@ public class AdaptiveEyeTracker : MonoBehaviour
             isCurrentlyLocked = false;
         }
 
-        // An eye left in a jar always keeps the eyes independent, however close they are
-        if (AnyEyeParked)
+        // One eye away (e.g. in a jar) and the other not: always independent, however close they are.
+        // If BOTH are away they use the normal distance rules, like they do on the head.
+        if (leftEyeParked != rightEyeParked)
             isCurrentlyLocked = false;
 
         // 5. Determine look targets independently based on active controls
@@ -113,20 +135,86 @@ public class AdaptiveEyeTracker : MonoBehaviour
             rightEyeTarget.position = sharedCenterPoint;
         }
 
+        UpdateHalfScreenOffsets();
+
         // 6. Compute vector angles and smoothly execute camera rotations ONLY if player has control
         if (leftEyeControlledByPlayer)
         {
-            Quaternion targetLeftRot = Quaternion.LookRotation(finalLeftLookTarget - leftEyeball.position);
+            Vector3 leftDir = Quaternion.AngleAxis(leftOffsetCurrent, Vector3.up) * (finalLeftLookTarget - leftEyeball.position);
+            Quaternion targetLeftRot = Quaternion.LookRotation(leftDir);
             leftEyeball.rotation = Quaternion.Slerp(leftEyeball.rotation, targetLeftRot, Time.deltaTime * lookSpeed);
             leftCamera.rotation = leftEyeball.rotation;
         }
 
         if (rightEyeControlledByPlayer)
         {
-            Quaternion targetRightRot = Quaternion.LookRotation(finalRightLookTarget - rightEyeball.position);
+            Vector3 rightDir = Quaternion.AngleAxis(rightOffsetCurrent, Vector3.up) * (finalRightLookTarget - rightEyeball.position);
+            Quaternion targetRightRot = Quaternion.LookRotation(rightDir);
             rightEyeball.rotation = Quaternion.Slerp(rightEyeball.rotation, targetRightRot, Time.deltaTime * lookSpeed);
             rightCamera.rotation = rightEyeball.rotation;
         }
+    }
+
+    // Puts both targets straight ahead of 'head' at 'distance', clears the half-screen offset and points both eyes
+    // (and cameras) at it immediately. Auto-focus then moves the targets to whatever is really in front of you.
+    // Used when both eyes are back on the head, so they start from a clean, centred state.
+    public void SnapEyesForward(Transform head, float distance)
+    {
+        if (head == null || leftEyeball == null || rightEyeball == null || leftEyeTarget == null || rightEyeTarget == null)
+            return;
+
+        Vector3 point = head.position + head.forward * distance;
+        leftEyeTarget.position = point;
+        rightEyeTarget.position = point;
+
+        leftOffsetCurrent = 0f;
+        rightOffsetCurrent = 0f;
+        lockedMissTimer = 0f;
+        leftMissTimer = 0f;
+        rightMissTimer = 0f;
+
+        AimNow(leftEyeball, leftCamera, point);
+        AimNow(rightEyeball, rightCamera, point);
+    }
+
+    private static void AimNow(Transform eye, Transform cam, Vector3 point)
+    {
+        Vector3 dir = point - eye.position;
+        if (dir.sqrMagnitude < 0.0001f) return;
+
+        eye.rotation = Quaternion.LookRotation(dir);
+        if (cam != null) cam.rotation = eye.rotation;
+    }
+
+    // Angle (degrees) that puts the centre of a half-width view in the middle of that half
+    private float HalfScreenAngle(Transform cameraTransform)
+    {
+        if (halfScreenOffsetDegrees > 0f) return halfScreenOffsetDegrees;
+
+        var cam = cameraTransform != null ? cameraTransform.GetComponent<Camera>() : null;
+        if (cam == null) return 0f;
+
+        float vFov = cam.fieldOfView * Mathf.Deg2Rad;
+        float hFov = 2f * Mathf.Atan(Mathf.Tan(vFov * 0.5f) * cam.aspect);
+        return Mathf.Atan(0.5f * Mathf.Tan(hFov * 0.5f)) * Mathf.Rad2Deg;
+    }
+
+    // Only the eye that is still on the head (while the other is away) gets turned toward the middle of its half.
+    private void UpdateHalfScreenOffsets()
+    {
+        float desiredLeft = 0f;
+        float desiredRight = 0f;
+
+        if (offsetHeadEyeToHalfScreen)
+        {
+            float side = leftEyeShowsLeftHalf ? 1f : -1f;
+            if (rightEyeParked && !leftEyeParked)  desiredLeft = side * HalfScreenAngle(leftCamera);
+            if (leftEyeParked && !rightEyeParked)  desiredRight = -side * HalfScreenAngle(rightCamera);
+        }
+
+        float k = Mathf.Clamp01(Time.deltaTime * offsetBlendSpeed);
+        leftOffsetCurrent = Mathf.Lerp(leftOffsetCurrent, desiredLeft, k);
+        rightOffsetCurrent = Mathf.Lerp(rightOffsetCurrent, desiredRight, k);
     }
 
     private void UpdateAutoTargets()
@@ -137,9 +225,9 @@ public class AdaptiveEyeTracker : MonoBehaviour
             lockedMissTimer = 0f;
             if (independentAutoFocus)
             {
-                if (leftEyeControlledByPlayer)
+                if (leftEyeControlledByPlayer && !leftFocusSuspended)
                     FocusSingleEye(leftEyeball, leftEyeTarget, leftEyeDebugColor, ref leftMissTimer);
-                if (rightEyeControlledByPlayer)
+                if (rightEyeControlledByPlayer && !rightFocusSuspended)
                     FocusSingleEye(rightEyeball, rightEyeTarget, rightEyeDebugColor, ref rightMissTimer);
             }
             return;
@@ -147,6 +235,9 @@ public class AdaptiveEyeTracker : MonoBehaviour
 
         leftMissTimer = 0f;
         rightMissTimer = 0f;
+
+        // an eye is in flight: leave the targets alone
+        if (leftFocusSuspended || rightFocusSuspended) return;
 
         // Cast a ray from the center of the two cameras forward
         Vector3 avgCameraPos = (leftCamera.position + rightCamera.position) / 2f;
