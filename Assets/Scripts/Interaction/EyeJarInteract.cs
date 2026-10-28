@@ -28,14 +28,24 @@ public class EyeJarInteract : Interactable
     [Tooltip("How far up/down an eye in the jar can look, from its anchor's forward.")]
     [Range(0f, 90f)] public float pitchLimit = 35f;
 
-    [Header("Menu")]
-    public string leftLabel = "LB";
-    public string rightLabel = "RB";
-    public string bothLabel = "X";
+    [Header("Controls")]
+    [Header("    > Controller")]
+    [Tooltip("Button names shown when playing with a gamepad.")]
+    public string leftControllerLabel = "LB";
+    public string rightControllerLabel = "RB";
+    public string bothControllerLabel = "X";
     [Tooltip("Optional button icons. If empty, the label text is shown in a box instead.")]
-    public Texture2D leftIcon;
-    public Texture2D rightIcon;
-    public Texture2D bothIcon;
+    public Texture2D leftControllerIcon;
+    public Texture2D rightControllerIcon;
+    public Texture2D bothControllerIcon;
+    [Header("    > Keyboard")]
+    [Tooltip("Button names shown when playing with keyboard and mouse.")]
+    public string leftKeyLabel = "LMB";
+    public string rightKeyLabel = "RMB";
+    public string bothKeyLabel = "E";
+    public Texture2D leftKeyIcon;
+    public Texture2D rightKeyIcon;
+    public Texture2D bothKeyIcon;
     public int fontSize = 20;
 
     enum Opt { None, Put, Take, Busy }
@@ -334,14 +344,21 @@ public class EyeJarInteract : Interactable
         if (!Setup(interactor)) return false;
 
         var rows = new List<Row>();
+        bool keys = interactor != null && interactor.UsingKeyboardMouse;
+        string lLabel = keys ? leftKeyLabel : leftControllerLabel;
+        string rLabel = keys ? rightKeyLabel : rightControllerLabel;
+        string bLabel = keys ? bothKeyLabel : bothControllerLabel;
+        Texture2D leftIcon = keys ? leftKeyIcon : leftControllerIcon;
+        Texture2D rightIcon = keys ? rightKeyIcon : rightControllerIcon;
+        Texture2D bothIcon = keys ? bothKeyIcon : bothControllerIcon;
 
         Opt l = GetOpt(true), r = GetOpt(false), both = GetBothOpt();
         if (l == Opt.Put || l == Opt.Take)
-            rows.Add(new Row { label = leftLabel, icon = leftIcon, text = (l == Opt.Put ? "Put" : "Take") + " left eye" });
+            rows.Add(new Row { label = lLabel, icon = keys ? null : leftIcon, text = (l == Opt.Put ? "Put" : "Take") + " left eye" });
         if (r == Opt.Put || r == Opt.Take)
-            rows.Add(new Row { label = rightLabel, icon = rightIcon, text = (r == Opt.Put ? "Put" : "Take") + " right eye" });
+            rows.Add(new Row { label = rLabel, icon = keys ? null : rightIcon, text = (r == Opt.Put ? "Put" : "Take") + " right eye" });
         if (both == Opt.Put || both == Opt.Take)
-            rows.Add(new Row { label = bothLabel, icon = bothIcon, text = (both == Opt.Put ? "Put" : "Take") + " both eyes" });
+            rows.Add(new Row { label = bLabel, icon = keys ? null : bothIcon, text = (both == Opt.Put ? "Put" : "Take") + " both eyes" });
 
         if (rows.Count == 0)
         {

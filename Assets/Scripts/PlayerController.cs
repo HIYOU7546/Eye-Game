@@ -31,6 +31,10 @@ public class PlayerController : MonoBehaviour
     [SerializeField] float independentLookSpeed = 80f; // target orbit speed (eyes independent)
     [SerializeField] float maxPitch = 80f;             // how far up/down you can look (degrees)
     [SerializeField] bool invertY = false;
+    [Tooltip("Mouse look speed. Roughly: degrees per pixel = this x Look Speed (0.001 x 100 = 0.1 degrees per pixel).")]
+    [SerializeField] float mouseSensitivity = 0.001f;
+    [Tooltip("Hide and lock the mouse while playing. Press Escape to free it / lock it again.")]
+    [SerializeField] bool lockCursor = true;
 
     [Header("Movement")]
     [Tooltip("The object that gets moved. Leave empty to move this object (Character Head).")]
@@ -40,7 +44,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] float bodyTurnSpeed = 360f;
 
     [Header("Crouch")]
-    [Tooltip("The object that gets lowered. Leave empty to crouch this object (Character Head)")]
+    [Tooltip("The object that gets 'shortend.' Leave empty to crouch this object (Character Head)")]
     public Transform crouchTarget;
     [SerializeField] float crouchSpeed = 2f;   // how fast you lower/raise (units per second)
     [SerializeField] float crouchDepth = 1f;   // how far down the crouch target drops (units)
@@ -80,7 +84,10 @@ public class PlayerController : MonoBehaviour
         if (switchEyeAction != null)
             switchEyeAction.performed += OnSwitchEye;
         if (crouchAction != null)
+        {
             crouchAction.performed += OnCrouch;
+            crouchAction.canceled += OnCrouch;
+        }
 
         // Start pitch from wherever the head is currently pointing
         headPitch = NormalizeAngle(transform.eulerAngles.x);
@@ -103,6 +110,8 @@ public class PlayerController : MonoBehaviour
 
     private void OnEnable()
     {
+        SetCursorLocked(lockCursor);
+
         moveAction?.Enable();
         lookAction?.Enable();
         switchEyeAction?.Enable();
@@ -118,8 +127,12 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        // Escape frees / re-locks the mouse
+        if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
+            SetCursorLocked(Cursor.lockState != CursorLockMode.Locked);
+
         if (lookAction != null)
-            lookInput = lookAction.ReadValue<Vector2>();
+            lookInput = ReadLook();
         if (moveAction != null)
             moveInput = moveAction.ReadValue<Vector2>();
 
@@ -145,6 +158,30 @@ public class PlayerController : MonoBehaviour
             RotateHead(lookInput.x, yInput);   // one eye in a jar, controlling the one still on the head: turn the head with it
         else
             SteerActiveEyeTarget(lookInput.x, yInput); // eyes apart: the stick moves the selected eye's target
+    }
+
+    // Reads the Look action. A stick gives a value from -1 to 1. A mouse gives pixels moved this frame,
+    // so it is turned into the same kind of value (per second) before being used.
+    Vector2 ReadLook()
+    {
+        Vector2 v = lookAction.ReadValue<Vector2>();
+
+        var control = lookAction.activeControl;
+        if (control != null && control.device is Mouse)
+        {
+            if (Cursor.lockState != CursorLockMode.Locked || Time.deltaTime <= 0f)
+                return Vector2.zero;
+
+            v = v / Time.deltaTime * mouseSensitivity;
+        }
+
+        return v;
+    }
+
+    static void SetCursorLocked(bool locked)
+    {
+        Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
+        Cursor.visible = !locked;
     }
 
     // Which way is "forward" for movement.
@@ -215,7 +252,17 @@ public class PlayerController : MonoBehaviour
     // Crouch: press the left stick down to toggle crouch / stand
     void OnCrouch(InputAction.CallbackContext context)
     {
-        isCrouching = !isCrouching;
+        if (context.control.device is Gamepad) // controller
+        {
+            if (context.performed)
+            {
+                isCrouching = !isCrouching;
+            }
+        }
+        else // keyboard
+        {
+            isCrouching = context.performed;
+        }
         Debug.Log($"Crouch toggled: {isCrouching} (from {context.control.path})");
     }
 
@@ -332,19 +379,19 @@ public class PlayerController : MonoBehaviour
         string controlName = context.control.name;
 
         // If the object in front of you (e.g. the eye jar) wants this bumper, don't switch eyes
-        bool leftBumper = controlName == "leftShoulder" || controlName == "leftBumper";
-        bool rightBumper = controlName == "rightShoulder" || controlName == "rightBumper";
+        bool leftBumper = controlName == "leftShoulder" || controlName == "leftBumper" || controlName == "leftButton";
+        bool rightBumper = controlName == "rightShoulder" || controlName == "rightBumper" || controlName == "rightButton";
         if ((leftBumper || rightBumper) && interactor != null && interactor.ConsumesBumper(leftBumper))
             return;
 
         if (!EyesIndependent) return;
 
-        if (controlName == "leftShoulder" || controlName == "leftBumper")
+        if (leftBumper)
         {
             activeEye = ActiveEye.Left;
             Debug.Log("Left Bumper Pressed - Controlling LEFT eye");
         }
-        else if (controlName == "rightShoulder" || controlName == "rightBumper")
+        else if (rightBumper)
         {
             activeEye = ActiveEye.Right;
             Debug.Log("Right Bumper Pressed - Controlling RIGHT eye");
@@ -363,6 +410,9 @@ public class PlayerController : MonoBehaviour
         if (switchEyeAction != null)
             switchEyeAction.performed -= OnSwitchEye;
         if (crouchAction != null)
+        {
             crouchAction.performed -= OnCrouch;
+            crouchAction.canceled -= OnCrouch;
+        }
     }
 }

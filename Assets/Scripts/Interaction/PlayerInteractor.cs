@@ -84,7 +84,33 @@ public class PlayerInteractor : MonoBehaviour
 
     void Update()
     {
+        DetectInputDevice();
         SetCurrent(FindBest());
+    }
+
+    // True while the player is using keyboard + mouse, false while using a gamepad.
+    // Menus use this to show the right button names.
+    public bool UsingKeyboardMouse { get; private set; } = true;
+
+    void DetectInputDevice()
+    {
+        var pad = Gamepad.current;
+        if (pad != null &&
+            (pad.leftStick.ReadValue().sqrMagnitude > 0.04f || pad.rightStick.ReadValue().sqrMagnitude > 0.04f ||
+             pad.buttonSouth.isPressed || pad.buttonWest.isPressed ||
+             pad.leftShoulder.isPressed || pad.rightShoulder.isPressed))
+        {
+            UsingKeyboardMouse = false;
+            return;
+        }
+
+        var kb = Keyboard.current;
+        var mouse = Mouse.current;
+        if ((kb != null && kb.anyKey.isPressed) ||
+            (mouse != null && (mouse.delta.ReadValue().sqrMagnitude > 0.5f || mouse.leftButton.isPressed || mouse.rightButton.isPressed)))
+        {
+            UsingKeyboardMouse = true;
+        }
     }
 
     // True when the focused object wants this bumper press (so it shouldn't switch eyes)
@@ -96,8 +122,8 @@ public class PlayerInteractor : MonoBehaviour
     void OnBumperPressed(InputAction.CallbackContext ctx)
     {
         string n = ctx.control.name;
-        bool isLeft = n == "leftShoulder" || n == "leftBumper";
-        bool isRight = n == "rightShoulder" || n == "rightBumper";
+        bool isLeft = n == "leftShoulder" || n == "leftBumper" || n == "leftButton";     // gamepad bumper or left mouse button
+        bool isRight = n == "rightShoulder" || n == "rightBumper" || n == "rightButton"; // gamepad bumper or right mouse button
         if (!isLeft && !isRight) return;
 
         if (Current != null && Current.UsesBumper(this, isLeft))
