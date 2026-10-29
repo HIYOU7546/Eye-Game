@@ -48,10 +48,12 @@ public class EyeJarInteract : Interactable
     public Texture2D bothKeyIcon;
     public int fontSize = 20;
 
-    enum Opt { None, Put, Take, Busy }
+    enum Opt { None, Put, Take, Steal, Busy }
 
     class Slot
     {
+        public AdaptiveEyeTracker tracker; // whose eye this is
+        public PlayerHands owner;          // whose eye this is (null = single player)
         public bool inJar;   // true from the moment the eye is sent until it is taken back
         public bool busy;    // true while the eye is flying
         public Transform eyeball, target;
@@ -63,7 +65,8 @@ public class EyeJarInteract : Interactable
 
     readonly Slot left = new Slot();
     readonly Slot right = new Slot();
-    AdaptiveEyeTracker tracker;
+    AdaptiveEyeTracker tracker; // the player currently using the jar
+    PlayerHands hands;          // the player currently using the jar
 
     // This jar can always be used (no cooldown), the eyes' own busy state limits it instead
     public override bool CanInteract => enabled;
@@ -76,7 +79,12 @@ public class EyeJarInteract : Interactable
         if (!Setup(interactor)) return;
 
         Opt both = GetBothOpt();
-        if (both == Opt.Take)
+        /*if (both == Opt.Steal)
+        {
+            StealEye(true);
+            StealEye(false);
+        }
+        else*/ if (both == Opt.Take)
         {
             onInteract?.Invoke();
             StartCoroutine(TakeBack(true));
@@ -111,14 +119,24 @@ public class EyeJarInteract : Interactable
             onInteract?.Invoke();
             StartCoroutine(TakeBack(leftBumper));
         }
+        else if (o == Opt.Steal)
+        {
+            // StealEye(leftBumper);
+        }
     }
 
     // ------------------------------------------------------------ state
 
     bool Setup(PlayerInteractor interactor)
     {
-        if (tracker == null && interactor != null) tracker = interactor.GetComponentInParent<AdaptiveEyeTracker>();
+        // whoever is using the jar right now (several players can share one jar)
+        if (interactor != null)
+        {
+            tracker = interactor.GetComponentInParent<AdaptiveEyeTracker>();
+            hands = interactor.GetComponentInParent<PlayerHands>();
+        }
         if (tracker == null) tracker = FindFirstObjectByType<AdaptiveEyeTracker>();
+        if (hands == null) hands = FindFirstObjectByType<PlayerHands>();
         return tracker != null;
     }
 
@@ -131,7 +149,12 @@ public class EyeJarInteract : Interactable
 
         Slot s = SlotFor(isLeft);
         if (s.busy) return Opt.Busy;
-        if (s.inJar) return Opt.Take;
+        if (s.inJar)
+        {
+            bool mine = s.owner == null || s.owner == hands;
+            if (mine) return (hands == null || hands.CanReceiveEye(isLeft)) ? Opt.Take : Opt.None;
+            return hands != null ? Opt.Steal : Opt.None; // someone else's eye: it can be stolen
+        }
         if (tracker.IsEyeParked(isLeft)) return Opt.None; // that eye is in a different jar
         return Opt.Put;
     }
@@ -141,8 +164,37 @@ public class EyeJarInteract : Interactable
         Opt l = GetOpt(true), r = GetOpt(false);
         if (l == Opt.Take && r == Opt.Take) return Opt.Take; // jar full
         if (l == Opt.Put && r == Opt.Put) return Opt.Put;    // jar empty and both eyes free
+        if (l == Opt.Steal && r == Opt.Steal) return Opt.Steal;
         return Opt.None;
     }
+
+    static string Verb(Opt o) => o == Opt.Put ? "Put" : o == Opt.Steal ? "Steal" : "Take";
+
+    // Takes an eye that ANOTHER player put in this jar, into one of our empty hands.
+    // (Eyes can only be stolen from jars.)
+    // void StealEye(bool isLeft)
+    // {
+    //     Slot s = SlotFor(isLeft);
+    //     if (hands == null || !s.inJar || s.busy || s.owner == null || s.owner == hands || s.tracker == null) return;
+
+    //     if (!hands.TryStealEyeFromJar(s.owner, s.tracker, isLeft, s.eyeball, s.target,
+    //                                   s.eyeOldParent, s.eyeOldLocalPos, s.eyeOldLocalScale))
+    //         return; // no free hand (the hands script shows the message)
+
+    //     // the eye has left; give its look-target back to its owner's head, as it was
+    //     s.target.SetParent(s.targetOldParent, false);
+    //     s.target.localPosition = s.targetOldLocalPos;
+    //     s.target.localScale = s.targetOldLocalScale;
+
+    //     if (s.holder != null) Destroy(s.holder.gameObject);
+    //     s.holder = null;
+    //     s.inJar = false;
+    //     s.eyeball = null;
+    //     s.target = null;
+    //     s.owner = null;
+    //     s.tracker = null;
+    //     onInteract?.Invoke();
+    // }
 
     // ------------------------------------------------------------ moving eyes
 
@@ -151,6 +203,9 @@ public class EyeJarInteract : Interactable
         Slot s = SlotFor(isLeft);
         Transform anchor = AnchorFor(isLeft);
         s.busy = true;
+        s.tracker = this.tracker;
+        s.owner = hands;
+        var tracker = s.tracker; // this slot always uses the tracker of the eye's owner
 
         s.eyeball = isLeft ? tracker.leftEyeball : tracker.rightEyeball;
         s.target = isLeft ? tracker.leftEyeTarget : tracker.rightEyeTarget;
@@ -188,6 +243,7 @@ public class EyeJarInteract : Interactable
     IEnumerator TakeBack(bool isLeft)
     {
         Slot s = SlotFor(isLeft);
+        var tracker = s.tracker != null ? s.tracker : this.tracker;
         s.busy = true;
         s.inJar = false; // stop limiting its range
         tracker.SetFocusSuspended(isLeft, true);
@@ -216,6 +272,8 @@ public class EyeJarInteract : Interactable
         if (!tracker.AnyEyeParked)
             tracker.SnapEyesForward(tracker.transform, returnFocusDistance);
 
+        s.owner = null;
+        s.tracker = null;
         s.busy = false;
     }
 
@@ -265,7 +323,7 @@ public class EyeJarInteract : Interactable
 
         bool bothSettled = left.inJar && right.inJar && !left.busy && !right.busy;
 
-        if (bothSettled && tracker != null && tracker.IsLocked)
+        if (bothSettled && left.tracker != null && left.tracker == right.tracker && left.tracker.IsLocked)
             LimitShared();   // eyes together: limit the shared look direction
         else
         {
@@ -353,12 +411,12 @@ public class EyeJarInteract : Interactable
         Texture2D bothIcon = keys ? bothKeyIcon : bothControllerIcon;
 
         Opt l = GetOpt(true), r = GetOpt(false), both = GetBothOpt();
-        if (l == Opt.Put || l == Opt.Take)
-            rows.Add(new Row { label = lLabel, icon = keys ? null : leftIcon, text = (l == Opt.Put ? "Put" : "Take") + " left eye" });
-        if (r == Opt.Put || r == Opt.Take)
-            rows.Add(new Row { label = rLabel, icon = keys ? null : rightIcon, text = (r == Opt.Put ? "Put" : "Take") + " right eye" });
-        if (both == Opt.Put || both == Opt.Take)
-            rows.Add(new Row { label = bLabel, icon = keys ? null : bothIcon, text = (both == Opt.Put ? "Put" : "Take") + " both eyes" });
+        if (l == Opt.Put || l == Opt.Take || l == Opt.Steal)
+            rows.Add(new Row { label = lLabel, icon = keys ? null : leftIcon, text = Verb(l) + " left eye" });
+        if (r == Opt.Put || r == Opt.Take || r == Opt.Steal)
+            rows.Add(new Row { label = rLabel, icon = keys ? null : rightIcon, text = Verb(r) + " right eye" });
+        if (both == Opt.Put || both == Opt.Take || both == Opt.Steal)
+            rows.Add(new Row { label = bLabel, icon = keys ? null : bothIcon, text = Verb(both) + " both eyes" });
 
         if (rows.Count == 0)
         {

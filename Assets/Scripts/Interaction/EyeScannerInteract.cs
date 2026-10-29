@@ -1,110 +1,114 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 
-// Put this on the jar INSTEAD of the Interactable component (it inherits from Interactable).
-// While you look at the jar a menu shows what you can do:
-//   Left bumper  = put / take the LEFT eye
-//   Right bumper = put / take the RIGHT eye
-//   Interact     = put / take BOTH eyes
-// Eyes in the jar keep working: you can still look around with them, but only within a limited range.
-[DefaultExecutionOrder(-50)] // runs before the eye tracker so the range limit is applied first
-public class EyeScannerInteract : Interactable
+// An eye scanner with ONE holder.
+//   Interact (gamepad south / E) when empty : if the player is holding a required object, one eye flies into the
+//                                             holder and a scan runs for 'scanLength' seconds. The eye can not be
+//                                             controlled while it is in the scanner.
+//   Interact when the scan has finished     : the eye flies back to the head.
+//   If the player is NOT holding a required object, nothing is placed and the "missing object" reaction runs.
+[DefaultExecutionOrder(-50)] // runs before the eye tracker
+public class EyeScanner : Interactable
 {
-    [Header("Eye Anchors")]
-    [Tooltip("Empty child objects inside the jar. Each eye sits at its anchor and looks along its blue (forward) arrow.")]
-    public Transform EyeAnchor;
+    public enum EyeChoice { Selected, Left, Right }
+    enum Opt { None, Scan, Take, Busy }
 
-
-    [Header("Eye Movement")]
-    [Tooltip("How far in front of the anchor the eye first focuses (it then auto-focuses on what it sees).")]
+    [Header("Holder")]
+    [Tooltip("Empty child object where the eye sits. The eye looks along its blue (forward) arrow.")]
+    public Transform eyeAnchor;
     public float lookDistance = 2f;
-    [Tooltip("Seconds an eye takes to fly to / from the jar.")]
+    [Tooltip("Seconds an eye takes to fly to / from the scanner.")]
     public float travelTime = 0.6f;
-    [Tooltip("When BOTH eyes are back on the head, the targets start this far straight ahead of the head, then auto-focus takes over.")]
+    [Tooltip("When BOTH eyes are back on the head, the targets start this far straight ahead of the head.")]
     public float returnFocusDistance = 10f;
-    [Tooltip("How far left/right an eye in the jar can look, from its anchor's forward.")]
-    public readonly float  yawLimit = 0f;
-    [Tooltip("How far up/down an eye in the jar can look, from its anchor's forward.")]
-    public readonly float pitchLimit = 0f;
+    [Tooltip("Which eye is scanned. 'Selected' uses the eye last chosen with the bumpers.")]
+    public EyeChoice eyeToScan = EyeChoice.Selected;
 
-    [Header("Controls")]
-    [Header("    > Controller")]
-    [Tooltip("Button names shown when playing with a gamepad.")]
-    public string InteractControllerLabel = "X";
-    [Tooltip("Optional button icons. If empty, the label text is shown in a box instead.")]
-    public Texture2D InteractController;
-    [Header("    > Keyboard")]
-    [Tooltip("Button names shown when playing with keyboard and mouse.")]
-    public string InteractKeyLabel = "E";
-    public Texture2D leftKeyIcon;
+    [Header("Scan")]
+    [Tooltip("How many seconds the scan takes.")]
+    public float scanLength = 3f;
+    [Tooltip("Objects the player can be holding to start a scan. Holding ANY one of them is enough. Leave empty to need nothing.")]
+    public List<GameObject> requiredObjects = new List<GameObject>();
 
+    [Header("Events")]
+    [Tooltip("The player tried to scan without holding a required object.")]
+    public UnityEvent onMissingObject;
+    public UnityEvent onScanStarted;
+    public UnityEvent onScanComplete;
+    public UnityEvent onEyeTaken;
+
+    [Header("Menu")]
+    public string interactLabel = "A";
+    public string interactKeyLabel = "E";
+    public Texture2D interactIcon;
     public int fontSize = 20;
 
-    enum Opt { None, Put, Take, Busy }
+    // 0 to 1 while scanning
+    public float ScanProgress { get; private set; }
 
-    class Slot
-    {
-        public bool inJar;   // true from the moment the eye is sent until it is taken back
-        public bool busy;    // true while the eye is flying
-        public Transform eyeball, target;
-        public Transform eyeOldParent, targetOldParent;
-        public Vector3 eyeOldLocalPos, targetOldLocalPos;
-        public Vector3 eyeOldLocalScale, targetOldLocalScale;
-        public Transform holder; // un-scaled object that follows the anchor; the eye and target live under it
-    }
-
-    readonly Slot left = new Slot();
-    readonly Slot right = new Slot();
     AdaptiveEyeTracker tracker;
+    PlayerController playerController;
+    PlayerHands hands;
 
-    // This jar can always be used (no cooldown), the eyes' own busy state limits it instead
+    bool holdsEye;       // an eye is in (or flying in/out of) the holder
+    bool holdsLeft;
+    bool busy;           // flying or scanning
+    bool settled;        // eye is in the holder and locked in place
+    bool wasControlled;
+
+    Transform eyeball, target, holder;
+    Transform eyeOldParent, targetOldParent;
+    Vector3 eyeOldLocalPos, targetOldLocalPos, eyeOldLocalScale, targetOldLocalScale;
+
     public override bool CanInteract => enabled;
 
     // ------------------------------------------------------------ input
 
-    // Interact button = both eyes
     public override void Interact(PlayerInteractor interactor)
     {
         if (!Setup(interactor)) return;
 
-        Opt both = GetBothOpt();
-        if (both == Opt.Take)
+        switch (GetOpt())
         {
-            onInteract?.Invoke();
-            StartCoroutine(TakeBack(true));
-            StartCoroutine(TakeBack(false));
-        }
-        else if (both == Opt.Put)
-        {
-            onInteract?.Invoke();
-            StartCoroutine(Place(true));
-            StartCoroutine(Place(false));
+            case Opt.Scan:
+                if (!IsHoldingRequiredObject())
+                {
+                    onMissingObject?.Invoke();
+                    OnMissingObject(interactor);
+                    return;
+                }
+
+                if (TryPickEye(out bool left))
+                {
+                    onInteract?.Invoke();
+                    StartCoroutine(ScanRoutine(left));
+                }
+                break;
+
+            case Opt.Take:
+                onInteract?.Invoke();
+                StartCoroutine(TakeBack());
+                break;
         }
     }
 
-    public override bool UsesBumper(PlayerInteractor interactor, bool leftBumper)
+    // ============================== YOUR REACTIONS GO HERE ==============================
+
+    // Called when the player tries to scan but is NOT holding any of the required objects.
+    protected virtual void OnMissingObject(PlayerInteractor interactor)
     {
-        if (!Setup(interactor)) return false;
-        return GetOpt(leftBumper) != Opt.None;
+        // TODO: add your reaction here (sound, message, alarm, ...)
     }
 
-    public override void OnBumper(PlayerInteractor interactor, bool leftBumper)
+    // Called when the scan finishes successfully (the eye is still in the scanner).
+    protected virtual void OnScanFinished()
     {
-        if (!Setup(interactor)) return;
-
-        Opt o = GetOpt(leftBumper);
-        if (o == Opt.Put)
-        {
-            onInteract?.Invoke();
-            StartCoroutine(Place(leftBumper));
-        }
-        else if (o == Opt.Take)
-        {
-            onInteract?.Invoke();
-            StartCoroutine(TakeBack(leftBumper));
-        }
+        // TODO: add your reaction here (open a door, unlock something, ...)
     }
+
+    // ====================================================================================
 
     // ------------------------------------------------------------ state
 
@@ -112,108 +116,170 @@ public class EyeScannerInteract : Interactable
     {
         if (tracker == null && interactor != null) tracker = interactor.GetComponentInParent<AdaptiveEyeTracker>();
         if (tracker == null) tracker = FindFirstObjectByType<AdaptiveEyeTracker>();
+
+        if (playerController == null && interactor != null) playerController = interactor.GetComponentInParent<PlayerController>();
+
+        if (hands == null && interactor != null) hands = interactor.GetComponentInParent<PlayerHands>();
+        if (hands == null) hands = FindFirstObjectByType<PlayerHands>();
+
         return tracker != null;
     }
 
-    Slot SlotFor(bool isLeft) => isLeft ? left : right;
-    Transform AnchorFor(bool isLeft) => isLeft ? leftEyeAnchor : rightEyeAnchor;
-
-    Opt GetOpt(bool isLeft)
+    Opt GetOpt()
     {
-        if (AnchorFor(isLeft) == null) return Opt.None;
-
-        Slot s = SlotFor(isLeft);
-        if (s.busy) return Opt.Busy;
-        if (s.inJar) return Opt.Take;
-        if (tracker.IsEyeParked(isLeft)) return Opt.None; // that eye is in a different jar
-        return Opt.Put;
+        if (busy) return Opt.Busy;
+        if (holdsEye) return Opt.Take;
+        if (eyeAnchor == null) return Opt.None;
+        return TryPickEye(out _) ? Opt.Scan : Opt.None;
     }
 
-    Opt GetBothOpt()
+    // Decides which eye goes in. Returns false if that eye is not free.
+    bool TryPickEye(out bool left)
     {
-        Opt l = GetOpt(true), r = GetOpt(false);
-        if (l == Opt.Take && r == Opt.Take) return Opt.Take; // jar full
-        if (l == Opt.Put && r == Opt.Put) return Opt.Put;    // jar empty and both eyes free
-        return Opt.None;
+        bool wantLeft;
+        switch (eyeToScan)
+        {
+            case EyeChoice.Left: wantLeft = true; break;
+            case EyeChoice.Right: wantLeft = false; break;
+            default: wantLeft = playerController == null || playerController.CurrentEye == PlayerController.ActiveEye.Left; break;
+        }
+
+        if (!tracker.IsEyeParked(wantLeft)) { left = wantLeft; return true; }
+
+        // the chosen eye is away somewhere else: with 'Selected' use the other one if it is free
+        if (eyeToScan == EyeChoice.Selected && !tracker.IsEyeParked(!wantLeft)) { left = !wantLeft; return true; }
+
+        left = wantLeft;
+        return false;
     }
 
-    // ------------------------------------------------------------ moving eyes
-
-    IEnumerator Place(bool isLeft)
+    bool IsHoldingRequiredObject()
     {
-        Slot s = SlotFor(isLeft);
-        Transform anchor = AnchorFor(isLeft);
-        s.busy = true;
+        if (requiredObjects == null || requiredObjects.Count == 0) return true; // nothing required
+        if (hands == null) return false;
 
-        s.eyeball = isLeft ? tracker.leftEyeball : tracker.rightEyeball;
-        s.target = isLeft ? tracker.leftEyeTarget : tracker.rightEyeTarget;
+        foreach (var obj in requiredObjects)
+            if (hands.IsHolding(obj)) return true;
 
-        // remember exactly how everything was set up on the head
-        s.eyeOldParent = s.eyeball.parent;
-        s.eyeOldLocalPos = s.eyeball.localPosition;
-        s.eyeOldLocalScale = s.eyeball.localScale;
-        s.targetOldParent = s.target.parent;
-        s.targetOldLocalPos = s.target.localPosition;
-        s.targetOldLocalScale = s.target.localScale;
-
-        tracker.SetEyeParked(isLeft, true);
-        tracker.SetFocusSuspended(isLeft, true);
-        s.inJar = true;
-
-        // A plain holder object (scale 1, no parent) follows the anchor. Putting the eye under this instead of
-        // directly under the (possibly scaled) jar means the eye can never get squashed or skewed.
-        var holderGO = new GameObject((isLeft ? "Left" : "Right") + "EyeHolder");
-        s.holder = holderGO.transform;
-        s.holder.SetPositionAndRotation(anchor.position, anchor.rotation);
-
-        s.eyeball.SetParent(s.holder, true);
-        s.target.SetParent(s.holder, false);
-        s.target.localScale = Vector3.one;
-        s.target.localPosition = Vector3.forward * lookDistance;
-
-        yield return Fly(s.eyeball, Vector3.zero, s.target);
-
-        s.target.localPosition = Vector3.forward * lookDistance; // start focused straight out of the jar
-        tracker.SetFocusSuspended(isLeft, false);
-        s.busy = false;
+        return false;
     }
 
-    IEnumerator TakeBack(bool isLeft)
+    void SetControlled(bool left, bool value)
     {
-        Slot s = SlotFor(isLeft);
-        s.busy = true;
-        s.inJar = false; // stop limiting its range
-        tracker.SetFocusSuspended(isLeft, true);
+        if (left) tracker.leftEyeControlledByPlayer = value;
+        else tracker.rightEyeControlledByPlayer = value;
+    }
+
+    // ------------------------------------------------------------ scan / take
+
+    IEnumerator ScanRoutine(bool left)
+    {
+        busy = true;
+        holdsEye = true;
+        holdsLeft = left;
+        ScanProgress = 0f;
+
+        eyeball = left ? tracker.leftEyeball : tracker.rightEyeball;
+        target = left ? tracker.leftEyeTarget : tracker.rightEyeTarget;
+
+        // remember exactly how things were on the head
+        eyeOldParent = eyeball.parent;
+        eyeOldLocalPos = eyeball.localPosition;
+        eyeOldLocalScale = eyeball.localScale;
+        targetOldParent = target.parent;
+        targetOldLocalPos = target.localPosition;
+        targetOldLocalScale = target.localScale;
+
+        tracker.SetEyeParked(left, true);
+        tracker.SetFocusSuspended(left, true);
+
+        // a plain, unscaled holder follows the anchor so the eye can never get skewed
+        holder = new GameObject("ScannerEyeHolder").transform;
+        holder.SetPositionAndRotation(eyeAnchor.position, eyeAnchor.rotation);
+
+        eyeball.SetParent(holder, true);
+        target.SetParent(holder, false);
+        target.localScale = Vector3.one;
+        target.localPosition = Vector3.forward * lookDistance;
+
+        yield return Fly(eyeball, Vector3.zero, target);
+
+        // the eye is now fixed in place and can not be controlled
+        wasControlled = left ? tracker.leftEyeControlledByPlayer : tracker.rightEyeControlledByPlayer;
+        SetControlled(left, false);
+        settled = true;
+
+        onScanStarted?.Invoke();
+
+        // the scan
+        float t = 0f;
+        while (t < scanLength)
+        {
+            t += Time.deltaTime;
+            ScanProgress = Mathf.Clamp01(t / Mathf.Max(0.01f, scanLength));
+            yield return null;
+        }
+        ScanProgress = 1f;
+
+        onScanComplete?.Invoke();
+        OnScanFinished();
+
+        busy = false; // now the player can take the eye back
+    }
+
+    IEnumerator TakeBack()
+    {
+        busy = true;
+        settled = false;
+
+        SetControlled(holdsLeft, wasControlled);
+        tracker.SetFocusSuspended(holdsLeft, true);
 
         // hand the target and eye back to the head, exactly as they were
-        s.target.SetParent(s.targetOldParent, false);
-        s.target.localPosition = s.targetOldLocalPos;
-        s.target.localScale = s.targetOldLocalScale;
-        s.eyeball.SetParent(s.eyeOldParent, true);
-        s.eyeball.localScale = s.eyeOldLocalScale;
+        target.SetParent(targetOldParent, false);
+        target.localPosition = targetOldLocalPos;
+        target.localScale = targetOldLocalScale;
+        eyeball.SetParent(eyeOldParent, true);
+        eyeball.localScale = eyeOldLocalScale;
 
-        if (s.holder != null) Destroy(s.holder.gameObject);
-        s.holder = null;
+        if (holder != null) Destroy(holder.gameObject);
+        holder = null;
 
-        yield return Fly(s.eyeball, s.eyeOldLocalPos, s.target);
+        yield return Fly(eyeball, eyeOldLocalPos, target);
 
-        // put the target exactly back where it was on the head, so the eyes look the way they did before
-        s.target.localPosition = s.targetOldLocalPos;
-        if (TryLookRotation(s.eyeball, s.target, out Quaternion arrived))
-            s.eyeball.rotation = arrived;
+        target.localPosition = targetOldLocalPos;
+        if (TryLookRotation(eyeball, target, out Quaternion arrived))
+            eyeball.rotation = arrived;
 
-        tracker.SetEyeParked(isLeft, false);
-        tracker.SetFocusSuspended(isLeft, false);
+        tracker.SetEyeParked(holdsLeft, false);
+        tracker.SetFocusSuspended(holdsLeft, false);
 
-        // Both eyes home: start from a clean state, targets straight ahead of the head
+        // both eyes home: start from a clean state, targets straight ahead of the head
         if (!tracker.AnyEyeParked)
             tracker.SnapEyesForward(tracker.transform, returnFocusDistance);
 
-        s.busy = false;
+        holdsEye = false;
+        ScanProgress = 0f;
+        busy = false;
+        onEyeTaken?.Invoke();
     }
 
-    // Slides an eye to 'endLocal' over travelTime while turning it toward 'lookAt' over the same time,
-    // so it arrives already facing the right way instead of slowly catching up afterwards.
+    void LateUpdate()
+    {
+        if (holder != null && eyeAnchor != null)
+            holder.SetPositionAndRotation(eyeAnchor.position, eyeAnchor.rotation);
+
+        // While the eye sits in the scanner it is not controlled, so we aim it (and its camera) ourselves
+        if (settled && eyeball != null)
+        {
+            eyeball.rotation = eyeAnchor.rotation;
+
+            Transform cam = holdsLeft ? tracker.leftCamera : tracker.rightCamera;
+            if (cam != null) cam.rotation = eyeball.rotation;
+        }
+    }
+
+    // Moves an eye to 'endLocal' over travelTime while turning it toward 'lookAt'
     IEnumerator Fly(Transform eye, Vector3 endLocal, Transform lookAt)
     {
         Vector3 start = eye.localPosition;
@@ -248,119 +314,26 @@ public class EyeScannerInteract : Interactable
         return true;
     }
 
-    // ------------------------------------------------------------ limited range
-
-    void LateUpdate()
-    {
-        // keep each eye holder on its anchor (the jar may move or rotate)
-        FollowAnchor(left, leftEyeAnchor);
-        FollowAnchor(right, rightEyeAnchor);
-
-        bool bothSettled = left.inJar && right.inJar && !left.busy && !right.busy;
-
-        if (bothSettled && tracker != null && tracker.IsLocked)
-            LimitShared();   // eyes together: limit the shared look direction
-        else
-        {
-            LimitEye(true);  // eyes apart: limit each eye on its own
-            LimitEye(false);
-        }
-    }
-
-    void FollowAnchor(Slot s, Transform anchor)
-    {
-        if (s.holder != null && anchor != null)
-            s.holder.SetPositionAndRotation(anchor.position, anchor.rotation);
-    }
-
-    // Clamps 'dir' to the yaw/pitch range around the frame's forward. Returns true if it had to change it.
-    bool ClampToRange(Quaternion frame, ref Vector3 dir)
-    {
-        Vector3 local = Quaternion.Inverse(frame) * dir;
-        float yaw = Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg;
-        float pitch = Mathf.Asin(Mathf.Clamp(local.y, -1f, 1f)) * Mathf.Rad2Deg; // + = up
-
-        float cy = Mathf.Clamp(yaw, -yawLimit, yawLimit);
-        float cp = Mathf.Clamp(pitch, -pitchLimit, pitchLimit);
-        if (Mathf.Approximately(cy, yaw) && Mathf.Approximately(cp, pitch)) return false;
-
-        dir = frame * (Quaternion.Euler(-cp, cy, 0f) * Vector3.forward);
-        return true;
-    }
-
-    void LimitEye(bool isLeft)
-    {
-        Slot s = SlotFor(isLeft);
-        Transform anchor = AnchorFor(isLeft);
-        if (!s.inJar || anchor == null || s.eyeball == null || s.target == null) return;
-
-        Vector3 offset = s.target.position - s.eyeball.position;
-        float dist = offset.magnitude;
-        if (dist < 0.001f) return;
-
-        Vector3 dir = offset / dist;
-        if (ClampToRange(anchor.rotation, ref dir))
-            s.target.position = s.eyeball.position + dir * dist;
-    }
-
-    void LimitShared()
-    {
-        if (leftEyeAnchor == null || rightEyeAnchor == null) return;
-        if (left.eyeball == null || right.eyeball == null || left.target == null || right.target == null) return;
-
-        Vector3 mid = (left.eyeball.position + right.eyeball.position) * 0.5f;
-        Vector3 center = (left.target.position + right.target.position) * 0.5f;
-        Vector3 offset = center - mid;
-        float dist = offset.magnitude;
-        if (dist < 0.001f) return;
-
-        Quaternion frame = Quaternion.Slerp(leftEyeAnchor.rotation, rightEyeAnchor.rotation, 0.5f);
-        Vector3 dir = offset / dist;
-        if (ClampToRange(frame, ref dir))
-        {
-            Vector3 clamped = mid + dir * dist;
-            left.target.position = clamped;
-            right.target.position = clamped;
-        }
-    }
-
     // ------------------------------------------------------------ menu
-
-    struct Row
-    {
-        public string label, text;
-        public Texture2D icon;
-    }
 
     public override bool DrawPromptGUI(PlayerInteractor interactor)
     {
         if (!Setup(interactor)) return false;
 
-        var rows = new List<Row>();
+        Opt opt = GetOpt();
+        if (opt == Opt.None) return true; // nothing to offer, skip the default prompt
+
         bool keys = interactor != null && interactor.UsingKeyboardMouse;
-        string lLabel = keys ? leftKeyLabel : leftControllerLabel;
-        string rLabel = keys ? rightKeyLabel : rightControllerLabel;
-        string bLabel = keys ? bothKeyLabel : bothControllerLabel;
-        Texture2D leftIcon = keys ? leftKeyIcon : leftControllerIcon;
-        Texture2D rightIcon = keys ? rightKeyIcon : rightControllerIcon;
-        Texture2D bothIcon = keys ? bothKeyIcon : bothControllerIcon;
+        string label = keys ? interactKeyLabel : interactLabel;
 
-        Opt l = GetOpt(true), r = GetOpt(false), both = GetBothOpt();
-        if (l == Opt.Put || l == Opt.Take)
-            rows.Add(new Row { label = lLabel, icon = keys ? null : leftIcon, text = (l == Opt.Put ? "Put" : "Take") + " left eye" });
-        if (r == Opt.Put || r == Opt.Take)
-            rows.Add(new Row { label = rLabel, icon = keys ? null : rightIcon, text = (r == Opt.Put ? "Put" : "Take") + " right eye" });
-        if (both == Opt.Put || both == Opt.Take)
-            rows.Add(new Row { label = bLabel, icon = keys ? null : bothIcon, text = (both == Opt.Put ? "Put" : "Take") + " both eyes" });
-
-        if (rows.Count == 0)
+        string text;
+        switch (opt)
         {
-            // nothing to offer: say why, so it is not a silent failure
-            string why = (leftEyeAnchor == null || rightEyeAnchor == null)
-                ? "EyeJar: assign the Left/Right Eye Anchor"
-                : "EyeJar: your eyes are busy or in another jar";
-            GUI.Box(new Rect((Screen.width - 380f) * 0.5f, Screen.height * 0.68f, 380f, 36f), why);
-            return true;
+            case Opt.Scan: text = "Scan eye"; break;
+            case Opt.Take: text = "Take eye"; break;
+            default:
+                text = holdsEye && settled ? "Scanning... " + Mathf.RoundToInt(ScanProgress * 100f) + "%" : "Please wait...";
+                break;
         }
 
         var badge = new GUIStyle(GUI.skin.box)
@@ -369,7 +342,7 @@ public class EyeScannerInteract : Interactable
             fontSize = fontSize - 4,
             fontStyle = FontStyle.Bold
         };
-        var text = new GUIStyle(GUI.skin.label)
+        var labelStyle = new GUIStyle(GUI.skin.label)
         {
             alignment = TextAnchor.MiddleLeft,
             fontSize = fontSize
@@ -377,21 +350,28 @@ public class EyeScannerInteract : Interactable
 
         float rowH = fontSize + 20f;
         float w = 380f;
-        float h = rows.Count * rowH + 16f;
+        float h = rowH + 16f + (opt == Opt.Busy ? 14f : 0f);
         var panel = new Rect((Screen.width - w) * 0.5f, Screen.height * 0.68f, w, h);
         GUI.Box(panel, GUIContent.none);
 
-        for (int i = 0; i < rows.Count; i++)
+        float y = panel.y + 8f;
+        var iconRect = new Rect(panel.x + 12f, y + 2f, rowH - 4f, rowH - 4f);
+
+        if (opt != Opt.Busy)
         {
-            float y = panel.y + 8f + i * rowH;
-            var iconRect = new Rect(panel.x + 12f, y + 2f, rowH - 4f, rowH - 4f);
+            if (!keys && interactIcon != null) GUI.DrawTexture(iconRect, interactIcon, ScaleMode.ScaleToFit);
+            else GUI.Box(iconRect, label, badge);
+            GUI.Label(new Rect(iconRect.xMax + 12f, y, w - rowH - 36f, rowH), text, labelStyle);
+        }
+        else
+        {
+            GUI.Label(new Rect(panel.x + 16f, y, w - 32f, rowH), text, labelStyle);
 
-            if (rows[i].icon != null)
-                GUI.DrawTexture(iconRect, rows[i].icon, ScaleMode.ScaleToFit);
-            else
-                GUI.Box(iconRect, rows[i].label, badge);
-
-            GUI.Label(new Rect(iconRect.xMax + 12f, y, w - rowH - 36f, rowH), rows[i].text, text);
+            // progress bar
+            var bar = new Rect(panel.x + 16f, y + rowH + 2f, w - 32f, 8f);
+            GUI.Box(bar, GUIContent.none);
+            if (holdsEye && settled)
+                GUI.Box(new Rect(bar.x, bar.y, bar.width * ScanProgress, bar.height), GUIContent.none);
         }
 
         return true;
