@@ -65,6 +65,11 @@ public class EyeJarInteract : Interactable
 
     readonly Slot left = new Slot();
     readonly Slot right = new Slot();
+
+    // ---- multiplayer hooks (used by NetworkJar) ----
+    public event System.Action<bool, bool> SlotChanged;   // (isLeft, occupied): raised for THIS player's own eyes
+    readonly bool[] remoteOccupied = new bool[2];          // a slot another player's eye is sitting in
+    public void SetRemoteOccupied(bool isLeft, bool occupied) { remoteOccupied[isLeft ? 0 : 1] = occupied; }
     AdaptiveEyeTracker tracker; // the player currently using the jar
     PlayerHands hands;          // the player currently using the jar
 
@@ -149,6 +154,7 @@ public class EyeJarInteract : Interactable
 
         Slot s = SlotFor(isLeft);
         if (s.busy) return Opt.Busy;
+        if (!s.inJar && remoteOccupied[isLeft ? 0 : 1]) return Opt.None; // another player's eye is in there
         if (s.inJar)
         {
             bool mine = s.owner == null || s.owner == hands;
@@ -221,6 +227,7 @@ public class EyeJarInteract : Interactable
         tracker.SetEyeParked(isLeft, true);
         tracker.SetFocusSuspended(isLeft, true);
         s.inJar = true;
+        SlotChanged?.Invoke(isLeft, true);
 
         // A plain holder object (scale 1, no parent) follows the anchor. Putting the eye under this instead of
         // directly under the (possibly scaled) jar means the eye can never get squashed or skewed.
@@ -246,6 +253,7 @@ public class EyeJarInteract : Interactable
         var tracker = s.tracker != null ? s.tracker : this.tracker;
         s.busy = true;
         s.inJar = false; // stop limiting its range
+        SlotChanged?.Invoke(isLeft, false);
         tracker.SetFocusSuspended(isLeft, true);
 
         // hand the target and eye back to the head, exactly as they were

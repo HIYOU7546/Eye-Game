@@ -48,6 +48,14 @@ public class EyeScanner : Interactable
     // 0 to 1 while scanning
     public float ScanProgress { get; private set; }
 
+    // ---- multiplayer hooks (used by NetworkScanner) ----
+    public event System.Action<bool> HoldChanged;   // this player put an eye in (true) / took it back (false)
+    public event System.Action ScanCompleted;        // this player's scan finished
+    bool remoteBusy;                                 // another player is using the scanner
+    public void SetRemoteBusy(bool value) { remoteBusy = value; }
+    public void RemoteScanComplete() { onScanComplete?.Invoke(); OnScanFinished(); }
+    AdaptiveEyeTracker holdTracker;                  // tracker of the player whose eye is in the scanner
+
     AdaptiveEyeTracker tracker;
     PlayerController playerController;
     PlayerHands hands;
@@ -114,12 +122,14 @@ public class EyeScanner : Interactable
 
     bool Setup(PlayerInteractor interactor)
     {
-        if (tracker == null && interactor != null) tracker = interactor.GetComponentInParent<AdaptiveEyeTracker>();
+        // always use whoever is interacting right now (several players share this scanner)
+        if (interactor != null)
+        {
+            tracker = interactor.GetComponentInParent<AdaptiveEyeTracker>();
+            playerController = interactor.GetComponentInParent<PlayerController>();
+            hands = interactor.GetComponentInParent<PlayerHands>();
+        }
         if (tracker == null) tracker = FindFirstObjectByType<AdaptiveEyeTracker>();
-
-        if (playerController == null && interactor != null) playerController = interactor.GetComponentInParent<PlayerController>();
-
-        if (hands == null && interactor != null) hands = interactor.GetComponentInParent<PlayerHands>();
         if (hands == null) hands = FindFirstObjectByType<PlayerHands>();
 
         return tracker != null;
@@ -129,6 +139,7 @@ public class EyeScanner : Interactable
     {
         if (busy) return Opt.Busy;
         if (holdsEye) return Opt.Take;
+        if (remoteBusy) return Opt.Busy;
         if (eyeAnchor == null) return Opt.None;
         return TryPickEye(out _) ? Opt.Scan : Opt.None;
     }
@@ -166,8 +177,8 @@ public class EyeScanner : Interactable
 
     void SetControlled(bool left, bool value)
     {
-        if (left) tracker.leftEyeControlledByPlayer = value;
-        else tracker.rightEyeControlledByPlayer = value;
+        if (left) holdTracker.leftEyeControlledByPlayer = value;
+        else holdTracker.rightEyeControlledByPlayer = value;
     }
 
     // ------------------------------------------------------------ scan / take
@@ -178,9 +189,11 @@ public class EyeScanner : Interactable
         holdsEye = true;
         holdsLeft = left;
         ScanProgress = 0f;
+        holdTracker = tracker;
+        HoldChanged?.Invoke(true);
 
-        eyeball = left ? tracker.leftEyeball : tracker.rightEyeball;
-        target = left ? tracker.leftEyeTarget : tracker.rightEyeTarget;
+        eyeball = left ? holdTracker.leftEyeball : holdTracker.rightEyeball;
+        target = left ? holdTracker.leftEyeTarget : holdTracker.rightEyeTarget;
 
         // remember exactly how things were on the head
         eyeOldParent = eyeball.parent;
@@ -190,8 +203,8 @@ public class EyeScanner : Interactable
         targetOldLocalPos = target.localPosition;
         targetOldLocalScale = target.localScale;
 
-        tracker.SetEyeParked(left, true);
-        tracker.SetFocusSuspended(left, true);
+        holdTracker.SetEyeParked(left, true);
+        holdTracker.SetFocusSuspended(left, true);
 
         // a plain, unscaled holder follows the anchor so the eye can never get skewed
         holder = new GameObject("ScannerEyeHolder").transform;
@@ -205,7 +218,7 @@ public class EyeScanner : Interactable
         yield return Fly(eyeball, Vector3.zero, target);
 
         // the eye is now fixed in place and can not be controlled
-        wasControlled = left ? tracker.leftEyeControlledByPlayer : tracker.rightEyeControlledByPlayer;
+        wasControlled = left ? holdTracker.leftEyeControlledByPlayer : holdTracker.rightEyeControlledByPlayer;
         SetControlled(left, false);
         settled = true;
 
@@ -223,6 +236,7 @@ public class EyeScanner : Interactable
 
         onScanComplete?.Invoke();
         OnScanFinished();
+        ScanCompleted?.Invoke();
 
         busy = false; // now the player can take the eye back
     }
@@ -233,7 +247,7 @@ public class EyeScanner : Interactable
         settled = false;
 
         SetControlled(holdsLeft, wasControlled);
-        tracker.SetFocusSuspended(holdsLeft, true);
+        holdTracker.SetFocusSuspended(holdsLeft, true);
 
         // hand the target and eye back to the head, exactly as they were
         target.SetParent(targetOldParent, false);
@@ -251,16 +265,17 @@ public class EyeScanner : Interactable
         if (TryLookRotation(eyeball, target, out Quaternion arrived))
             eyeball.rotation = arrived;
 
-        tracker.SetEyeParked(holdsLeft, false);
-        tracker.SetFocusSuspended(holdsLeft, false);
+        holdTracker.SetEyeParked(holdsLeft, false);
+        holdTracker.SetFocusSuspended(holdsLeft, false);
 
         // both eyes home: start from a clean state, targets straight ahead of the head
-        if (!tracker.AnyEyeParked)
-            tracker.SnapEyesForward(tracker.transform, returnFocusDistance);
+        if (!holdTracker.AnyEyeParked)
+            holdTracker.SnapEyesForward(holdTracker.transform, returnFocusDistance);
 
         holdsEye = false;
         ScanProgress = 0f;
         busy = false;
+        HoldChanged?.Invoke(false);
         onEyeTaken?.Invoke();
     }
 
@@ -274,7 +289,7 @@ public class EyeScanner : Interactable
         {
             eyeball.rotation = eyeAnchor.rotation;
 
-            Transform cam = holdsLeft ? tracker.leftCamera : tracker.rightCamera;
+            Transform cam = holdsLeft ? holdTracker.leftCamera : holdTracker.rightCamera;
             if (cam != null) cam.rotation = eyeball.rotation;
         }
     }
