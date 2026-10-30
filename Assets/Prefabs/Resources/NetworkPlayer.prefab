@@ -1203,7 +1203,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 21
   maxFocusDistance: 50
-  targetMoveSpeed: 10
+  targetMoveSpeed: 15
   independentAutoFocus: 1
   noHitDelay: 1.5
   defaultFocusDistance: 10
@@ -1213,7 +1213,7 @@ MonoBehaviour:
   rightEyeControlledByPlayer: 1
   lockThreshold: 2
   unlockThreshold: 5
-  lookSpeed: 10
+  lookSpeed: 15
   offsetHeadEyeToHalfScreen: 1
   leftEyeShowsLeftHalf: 1
   halfScreenOffsetDegrees: 0
@@ -1267,8 +1267,8 @@ MonoBehaviour:
   interactActionName: Interact
   switchEyeActionName: Switch Eye
   origin: {fileID: 0}
-  forwardOffset: 1.5
-  radius: 2
+  forwardOffset: 0.74
+  radius: 1
   minFacingDot: 0.4
   interactMask:
     serializedVersion: 2
@@ -1295,7 +1295,7 @@ MonoBehaviour:
   rightHandAnchor: {fileID: 6650849151369076929}
   twoHandAnchor: {fileID: 1015101169642683849}
   backpackRoot: {fileID: 684698519062098692}
-  backpackCapacity: 6
+  backpackCapacity: 2
   dropThrowSpeed: 2
   stolenEyeFlySpeed: 6
   returnFocusDistance: 10
