@@ -42,7 +42,8 @@ public class EyeScanner : Interactable
     [Header("Menu")]
     public string interactLabel = "A";
     public string interactKeyLabel = "E";
-    public Texture2D interactIcon;
+    public Texture2D interactControllerIcon;
+    public Texture2D interactKeyIcon;
     public int fontSize = 20;
 
     // 0 to 1 while scanning
@@ -340,6 +341,7 @@ public class EyeScanner : Interactable
 
         bool keys = interactor != null && interactor.UsingKeyboardMouse;
         string label = keys ? interactKeyLabel : interactLabel;
+        Texture2D icon = keys ? interactKeyIcon : interactControllerIcon;
 
         string text;
         switch (opt)
@@ -374,7 +376,7 @@ public class EyeScanner : Interactable
 
         if (opt != Opt.Busy)
         {
-            if (!keys && interactIcon != null) GUI.DrawTexture(iconRect, interactIcon, ScaleMode.ScaleToFit);
+            if (!keys && icon != null) GUI.DrawTexture(iconRect, icon, ScaleMode.ScaleToFit);
             else GUI.Box(iconRect, label, badge);
             GUI.Label(new Rect(iconRect.xMax + 12f, y, w - rowH - 36f, rowH), text, labelStyle);
         }

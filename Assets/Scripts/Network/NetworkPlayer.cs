@@ -39,6 +39,9 @@ public class NetworkPlayer : MonoBehaviourPun, IPunObservable
     bool nLeftParked, nRightParked;
     Vector3 nLeftPos, nRightPos;
     Quaternion nLeftRot, nRightRot;
+    bool leftEyeStolen, rightEyeStolen;
+    public bool IsEyeStolen(bool left) => left ? leftEyeStolen : rightEyeStolen;
+    public void SetEyeStolen(bool left, bool value) { if (left) leftEyeStolen = value; else rightEyeStolen = value; }
 
     void Awake()
     {
@@ -121,8 +124,8 @@ public class NetworkPlayer : MonoBehaviourPun, IPunObservable
             {
                 ReadEye(stream, ref nLeftParked, ref nLeftPos, ref nLeftRot);
                 ReadEye(stream, ref nRightParked, ref nRightPos, ref nRightRot);
-                tracker.SetEyeParked(true, nLeftParked);
-                tracker.SetEyeParked(false, nRightParked);
+                tracker.SetEyeParked(true, nLeftParked || leftEyeStolen);
+                tracker.SetEyeParked(false, nRightParked || rightEyeStolen);
             }
 
             if (!hasState)

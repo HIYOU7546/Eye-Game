@@ -84,6 +84,24 @@ public class PlayerHands : MonoBehaviour
 
     Hand HandFor(bool l) => l ? left : right;
 
+    // -------------------------------------- temp location ---------------
+    public event System.Action<PlayerHands, bool, bool> EyeStolen;   // victim, eyeLeft, handLeft
+    public event System.Action<PlayerHands, bool> EyeReturned;       // victim, eyeLeft
+
+    readonly bool[] eyeLoaned = new bool[2]; // [0] left eye / [1] right eye is in someone else's hand
+    public void SetEyeLoaned(bool leftEye, bool loaned) { eyeLoaned[leftEye ? 0 : 1] = loaned; }
+
+    public int StolenEyeCount => stolenEyes.Count;
+    public bool GetStolenEye(int i, out PlayerHands victim, out bool eyeLeft, out Transform eyeball)
+    {
+        victim = null; eyeLeft = false; eyeball = null;
+        if (i < 0 || i >= stolenEyes.Count) return false;
+        StolenEye s = stolenEyes[i];
+        if (s.eyeball == null || s.victim == null) return false;
+        victim = s.victim; eyeLeft = s.eyeLeft; eyeball = s.eyeball;
+        return true;
+    }
+
     Transform AnchorFor(bool l)
     {
         Transform a = l ? leftHandAnchor : rightHandAnchor;
@@ -141,7 +159,7 @@ public class PlayerHands : MonoBehaviour
     public bool IsHandEmpty(bool l)
     {
         Hand h = HandFor(l);
-        return h.item == null && h.stolen == null && !h.reserved && twoHanded == null && !OwnEyeInHand(l);
+        return h.item == null && h.stolen == null && !h.reserved && twoHanded == null && !OwnEyeInHand(l) && !eyeLoaned[l ? 0 : 1];
     }
 
     // Can the eye of this side come back into its hand? (the eye itself is away, so only items matter)
@@ -351,6 +369,7 @@ public class PlayerHands : MonoBehaviour
         HandFor(handLeft).stolen = s;
         stolenEyes.Add(s);
         Notify("Took their " + (eyeLeft ? "left" : "right") + " eye");
+        EyeStolen?.Invoke(victim, eyeLeft, handLeft);
         return true;
     }
 
@@ -388,13 +407,20 @@ public class PlayerHands : MonoBehaviour
         for (int i = stolenEyes.Count - 1; i >= 0; i--)
         {
             StolenEye s = stolenEyes[i];
-            if (s.eyeball == null) { stolenEyes.RemoveAt(i); continue; }
+            if (s.eyeball == null || s.victim == null)
+            {
+                if (HandFor(s.handLeft).stolen == s) HandFor(s.handLeft).stolen = null;
+                if (s.holder != null) Destroy(s.holder.gameObject);
+                stolenEyes.RemoveAt(i);
+                continue;
+            }
 
             if (!s.returning) UpdateHeldEye(s);
             else if (UpdateReturningEye(s))
             {
                 FinishReturn(s);
                 stolenEyes.RemoveAt(i);
+                EyeReturned?.Invoke(s.victim, s.eyeLeft);
             }
         }
     }
