@@ -42,6 +42,13 @@ public class NetworkPlayer : MonoBehaviourPun, IPunObservable
     bool leftEyeStolen, rightEyeStolen;
     public bool IsEyeStolen(bool left) => left ? leftEyeStolen : rightEyeStolen;
     public void SetEyeStolen(bool left, bool value) { if (left) leftEyeStolen = value; else rightEyeStolen = value; }
+    static readonly System.Collections.Generic.List<NetworkPlayer> All = new System.Collections.Generic.List<NetworkPlayer>();
+    public static NetworkPlayer FindByActor(int actorNumber)
+    {
+        foreach (var np in All)
+            if (np != null && np.photonView.OwnerActorNr == actorNumber) return np;
+        return null;
+    }
 
     void Awake()
     {
@@ -53,6 +60,8 @@ public class NetworkPlayer : MonoBehaviourPun, IPunObservable
 
     void Start()
     {
+        All.Add(this);
+
         bool mine = photonView.IsMine;
         if (mine) Local = this;
 
@@ -64,6 +73,8 @@ public class NetworkPlayer : MonoBehaviourPun, IPunObservable
 
     void OnDestroy()
     {
+        All.Remove(this);
+
         if (Local == this) Local = null;
     }
 

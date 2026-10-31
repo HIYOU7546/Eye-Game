@@ -34,7 +34,7 @@ public class NetworkJar : MonoBehaviourPunCallbacks
     void RpcSlot(bool left, bool occupied, PhotonMessageInfo info)
     {
         occupant[left ? 0 : 1] = occupied && info.Sender != null ? info.Sender.ActorNumber : -1;
-        jar.SetRemoteOccupied(left, occupied);
+        jar.SetRemoteOccupied(left, occupied, occupant[left ? 0 : 1]);
     }
 
     // someone left the room with an eye still in the jar: free the slot

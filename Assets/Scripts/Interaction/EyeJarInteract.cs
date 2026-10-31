@@ -69,7 +69,12 @@ public class EyeJarInteract : Interactable
     // ---- multiplayer hooks (used by NetworkJar) ----
     public event System.Action<bool, bool> SlotChanged;   // (isLeft, occupied): raised for THIS player's own eyes
     readonly bool[] remoteOccupied = new bool[2];          // a slot another player's eye is sitting in
-    public void SetRemoteOccupied(bool isLeft, bool occupied) { remoteOccupied[isLeft ? 0 : 1] = occupied; }
+    readonly int[] remoteActor = { -1, -1 };  // who owns the eye in each remote-occupied slot
+    public void SetRemoteOccupied(bool isLeft, bool occupied, int actor = -1)
+    {
+        remoteOccupied[isLeft ? 0 : 1] = occupied;
+        remoteActor[isLeft ? 0 : 1] = occupied ? actor : -1;
+    }
     AdaptiveEyeTracker tracker; // the player currently using the jar
     PlayerHands hands;          // the player currently using the jar
 
@@ -84,12 +89,12 @@ public class EyeJarInteract : Interactable
         if (!Setup(interactor)) return;
 
         Opt both = GetBothOpt();
-        /*if (both == Opt.Steal)
+        if (both == Opt.Steal)
         {
             StealEye(true);
             StealEye(false);
         }
-        else*/ if (both == Opt.Take)
+        else if (both == Opt.Take)
         {
             onInteract?.Invoke();
             StartCoroutine(TakeBack(true));
@@ -126,7 +131,7 @@ public class EyeJarInteract : Interactable
         }
         else if (o == Opt.Steal)
         {
-            // StealEye(leftBumper);
+            StealEye(leftBumper);
         }
     }
 
@@ -154,12 +159,12 @@ public class EyeJarInteract : Interactable
 
         Slot s = SlotFor(isLeft);
         if (s.busy) return Opt.Busy;
-        if (!s.inJar && remoteOccupied[isLeft ? 0 : 1]) return Opt.None; // another player's eye is in there
+        if (!s.inJar && remoteOccupied[isLeft ? 0 : 1])
+            return CanStealRemote(isLeft) ? Opt.Steal : Opt.None; // another player's eye is in there
         if (s.inJar)
         {
             bool mine = s.owner == null || s.owner == hands;
-            if (mine) return (hands == null || hands.CanReceiveEye(isLeft)) ? Opt.Take : Opt.None;
-            return hands != null ? Opt.Steal : Opt.None; // someone else's eye: it can be stolen
+            return mine && (hands == null || hands.CanReceiveEye(isLeft)) ? Opt.Take : Opt.None;
         }
         if (tracker.IsEyeParked(isLeft)) return Opt.None; // that eye is in a different jar
         return Opt.Put;
@@ -176,31 +181,52 @@ public class EyeJarInteract : Interactable
 
     static string Verb(Opt o) => o == Opt.Put ? "Put" : o == Opt.Steal ? "Steal" : "Take";
 
-    // Takes an eye that ANOTHER player put in this jar, into one of our empty hands.
-    // (Eyes can only be stolen from jars.)
-    // void StealEye(bool isLeft)
-    // {
-    //     Slot s = SlotFor(isLeft);
-    //     if (hands == null || !s.inJar || s.busy || s.owner == null || s.owner == hands || s.tracker == null) return;
+    PlayerHands RemoteOwner(bool isLeft)
+    {
+        int actor = remoteActor[isLeft ? 0 : 1];
+        if (actor < 0) return null;
+        NetworkPlayer np = NetworkPlayer.FindByActor(actor);
+        return np != null ? np.hands : null;
+    }
 
-    //     if (!hands.TryStealEyeFromJar(s.owner, s.tracker, isLeft, s.eyeball, s.target,
-    //                                   s.eyeOldParent, s.eyeOldLocalPos, s.eyeOldLocalScale))
-    //         return; // no free hand (the hands script shows the message)
+    bool CanStealRemote(bool isLeft)
+    {
+        if (!StealRules.FromJars || hands == null) return false;
+        PlayerHands victim = RemoteOwner(isLeft);
+        if (victim == null || victim == hands || victim.eyeTracker == null) return false;
+        NetworkPlayer np = victim.GetComponentInParent<NetworkPlayer>();
+        return victim.eyeTracker.IsEyeParked(isLeft) && (np == null || !np.IsEyeStolen(isLeft));
+    }
 
-    //     // the eye has left; give its look-target back to its owner's head, as it was
-    //     s.target.SetParent(s.targetOldParent, false);
-    //     s.target.localPosition = s.targetOldLocalPos;
-    //     s.target.localScale = s.targetOldLocalScale;
+    void StealEye(bool isLeft)
+    {
+        if (!CanStealRemote(isLeft)) return;
+        PlayerHands victim = RemoteOwner(isLeft);
+        if (!hands.TryStealEye(victim, isLeft, true)) return; // no free hand: PlayerHands shows the message
 
-    //     if (s.holder != null) Destroy(s.holder.gameObject);
-    //     s.holder = null;
-    //     s.inJar = false;
-    //     s.eyeball = null;
-    //     s.target = null;
-    //     s.owner = null;
-    //     s.tracker = null;
-    //     onInteract?.Invoke();
-    // }
+        remoteOccupied[isLeft ? 0 : 1] = false;
+        remoteActor[isLeft ? 0 : 1] = -1;
+        onInteract?.Invoke();
+    }
+
+    // On the OWNER's machine: their eye was taken out of this jar, so let go of it.
+    void ReleaseIfStolen(Slot s, bool isLeft)
+    {
+        if (!s.inJar || s.busy || s.owner == null || !s.owner.IsEyeLoaned(isLeft)) return;
+
+        // look-target goes back to the owner's head, then the eye (before the holder is destroyed)
+        s.target.SetParent(s.targetOldParent, false);
+        s.target.localPosition = s.targetOldLocalPos;
+        s.target.localScale = s.targetOldLocalScale;
+        s.eyeball.SetParent(s.eyeOldParent, true);
+        s.eyeball.localScale = s.eyeOldLocalScale;
+
+        if (s.holder != null) Destroy(s.holder.gameObject);
+        s.holder = null;
+        s.inJar = false;
+        s.eyeball = null; s.target = null; s.owner = null; s.tracker = null;
+        SlotChanged?.Invoke(isLeft, false);
+    }
 
     // ------------------------------------------------------------ moving eyes
 
@@ -325,6 +351,9 @@ public class EyeJarInteract : Interactable
 
     void LateUpdate()
     {
+        ReleaseIfStolen(left, true);
+        ReleaseIfStolen(right, false);
+
         // keep each eye holder on its anchor (the jar may move or rotate)
         FollowAnchor(left, leftEyeAnchor);
         FollowAnchor(right, rightEyeAnchor);

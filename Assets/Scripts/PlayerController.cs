@@ -9,6 +9,7 @@ public class PlayerController : MonoBehaviour
     InputAction lookAction;
     InputAction switchEyeAction;
     InputAction crouchAction;
+    InputAction cursorMenuAction;
 
     [Header("Input")]
     [Tooltip("Optional. If empty, the project-wide actions asset is used.")]
@@ -80,6 +81,7 @@ public class PlayerController : MonoBehaviour
         lookAction = actions.FindAction("Look");
         switchEyeAction = actions.FindAction("Switch Eye");
         crouchAction = actions.FindAction("Crouch");
+        cursorMenuAction = actions.FindAction("Cursor/Menu");
 
         if (switchEyeAction != null)
             switchEyeAction.performed += OnSwitchEye;
@@ -116,6 +118,7 @@ public class PlayerController : MonoBehaviour
         lookAction?.Enable();
         switchEyeAction?.Enable();
         crouchAction?.Enable();
+        cursorMenuAction?.Enable();
     }
     private void OnDisable()
     {
@@ -123,6 +126,7 @@ public class PlayerController : MonoBehaviour
         lookAction?.Disable();
         switchEyeAction?.Disable();
         crouchAction?.Disable();
+        cursorMenuAction?.Disable();
     }
 
     void Update()

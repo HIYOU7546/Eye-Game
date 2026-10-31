@@ -72,6 +72,10 @@ public class PlayerHands : MonoBehaviour
         public bool returning;
     }
 
+    readonly Vector3[] homeEyePos = new Vector3[2]; // where each eye sits on the head: [0] left, [1] right
+    public Vector3 HomeEyeLocalPos(bool left) => homeEyePos[left ? 0 : 1];
+    public bool IsEyeLoaned(bool left) => eyeLoaned[left ? 0 : 1];
+
     readonly Hand left = new Hand();
     readonly Hand right = new Hand();
     PickupItem twoHanded;
@@ -128,6 +132,14 @@ public class PlayerHands : MonoBehaviour
         {
             dropAction = actions.FindAction(dropActionName, false);
             backpackAction = actions.FindAction(backpackActionName, false);
+            if (dropAction == null) Debug.LogWarning($"PlayerHands: action '{dropActionName}' not found in the Input Actions asset.");
+            if (backpackAction == null) Debug.LogWarning($"PlayerHands: action '{backpackActionName}' not found in the Input Actions asset.");
+        }
+
+        if (eyeTracker != null)
+        {
+            if (eyeTracker.leftEyeball != null) homeEyePos[0] = eyeTracker.leftEyeball.localPosition;
+            if (eyeTracker.rightEyeball != null) homeEyePos[1] = eyeTracker.rightEyeball.localPosition;
         }
     }
 
@@ -305,15 +317,13 @@ public class PlayerHands : MonoBehaviour
 
     void Update()
     {
-        if (Pressed(dropAction, () => Gamepad.current != null && Gamepad.current.dpad.down.wasPressedThisFrame
-                                   || Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame))
+        if (dropAction != null && dropAction.WasPressedThisFrame())
         {
             bool a = ActiveHandIsLeft;
             if (!TryDropHand(a)) TryDropHand(!a);
         }
 
-        if (Pressed(backpackAction, () => Gamepad.current != null && Gamepad.current.dpad.up.wasPressedThisFrame
-                                       || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame))
+        if (backpackAction != null && backpackAction.WasPressedThisFrame())
         {
             bool a = ActiveHandIsLeft;
             // holding a backpack item: put it away. Otherwise take the last one out.
@@ -322,19 +332,17 @@ public class PlayerHands : MonoBehaviour
         }
     }
 
-    static bool Pressed(InputAction action, System.Func<bool> fallback)
-    {
-        return action != null ? action.WasPressedThisFrame() : fallback();
-    }
-
     // ------------------------------------------------------------ stealing eyes
 
     // Take 'victim's eye from THEIR hand into one of OUR empty hands.
-    public bool TryStealEye(PlayerHands victim, bool eyeLeft)
+    public bool TryStealEye(PlayerHands victim, bool eyeLeft, bool fromJar = false)
     {
+        if (fromJar ? !StealRules.FromJars : !StealRules.FromPlayers) return false;
         if (victim == null || victim == this || victim.eyeTracker == null) return false;
 
-        if (!victim.OwnEyeInHand(eyeLeft)) { Notify("That eye is not available"); return false; }
+        // from a jar the eye is "parked"; from a head it is sitting in its owner's hand
+        bool available = fromJar ? victim.eyeTracker.IsEyeParked(eyeLeft) : victim.OwnEyeInHand(eyeLeft);
+        if (!available) { Notify("That eye is not available"); return false; }
         if (!PickEmptyHand(out bool handLeft)) { Notify("You need a free hand to take an eye"); return false; }
 
         AdaptiveEyeTracker t = victim.eyeTracker;
@@ -351,7 +359,7 @@ public class PlayerHands : MonoBehaviour
         if (s.eyeball == null) return false;
 
         s.oldParent = s.eyeball.parent;
-        s.oldLocalPos = s.eyeball.localPosition;
+        s.oldLocalPos = fromJar ? victim.HomeEyeLocalPos(eyeLeft) : s.eyeball.localPosition;
         s.oldLocalScale = s.eyeball.localScale;
         s.wasControlled = eyeLeft ? t.leftEyeControlledByPlayer : t.rightEyeControlledByPlayer;
 
