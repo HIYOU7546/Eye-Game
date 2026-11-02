@@ -1,6 +1,7 @@
-using UnityEngine;
 using Photon.Pun;
 using Photon.Realtime;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 
 // Put this on ONE object in your game scene. It connects, joins (or creates) a room and spawns the player.
 // The player prefab must be inside a folder called "Resources" and its name must match 'playerPrefabName'.
@@ -17,13 +18,17 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
     [Header("Spawning")]
     [Tooltip("Name of the player prefab inside a Resources folder.")]
     public string playerPrefabName = "NetworkPlayer";
+
     [Tooltip("One spawn point per player slot. Player N uses point N (wraps around).")]
     public Transform[] spawnPoints;
 
     [Header("Debug")]
     [Tooltip("Small status box in the corner once you are in the game.")]
     public bool showStatus = true;
-    [Tooltip("Cover the screen with a message until you are connected and your player has spawned.")]
+
+    [Tooltip(
+        "Cover the screen with a message until you are connected and your player has spawned."
+    )]
     public bool showConnectingScreen = true;
 
     string problem; // the last thing that went wrong (shown on the connecting screen)
@@ -32,6 +37,7 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
     {
         PhotonNetwork.AutomaticallySyncScene = true;
         PhotonNetwork.GameVersion = gameVersion;
+        PhotonNetwork.NickName = GameSession.PlayerName;
 
         if (!PhotonNetwork.IsConnected)
             PhotonNetwork.ConnectUsingSettings();
@@ -42,7 +48,20 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
     public override void OnConnectedToMaster()
     {
         problem = null;
-        PhotonNetwork.JoinOrCreateRoom(roomName, new RoomOptions { MaxPlayers = maxPlayers }, TypedLobby.Default);
+        var options = new RoomOptions { MaxPlayers = maxPlayers };
+
+        switch (GameSession.Mode)
+        {
+            case GameSession.JoinMode.Create:
+                PhotonNetwork.CreateRoom(GameSession.RoomName, options, TypedLobby.Default);
+                break;
+            case GameSession.JoinMode.Join:
+                PhotonNetwork.JoinRoom(GameSession.RoomName);
+                break;
+            default: // pressing Play directly in the game scene
+                PhotonNetwork.JoinOrCreateRoom(roomName, options, TypedLobby.Default);
+                break;
+        }
     }
 
     public override void OnJoinedRoom()
@@ -69,13 +88,16 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
 
     void SpawnPlayer()
     {
-        if (NetworkPlayer.Local != null) return;
+        if (NetworkPlayer.Local != null)
+            return;
 
         Vector3 pos = Vector3.zero;
         Quaternion rot = Quaternion.identity;
         if (spawnPoints != null && spawnPoints.Length > 0)
         {
-            Transform p = spawnPoints[Mathf.Max(0, PhotonNetwork.LocalPlayer.ActorNumber - 1) % spawnPoints.Length];
+            Transform p = spawnPoints[
+                Mathf.Max(0, PhotonNetwork.LocalPlayer.ActorNumber - 1) % spawnPoints.Length
+            ];
             pos = p.position;
             rot = p.rotation;
         }
@@ -95,13 +117,16 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
             return;
         }
 
-        if (showStatus) DrawCornerStatus();
+        if (showStatus)
+            DrawCornerStatus();
     }
 
     string StatusText()
     {
-        if (problem != null) return problem;
-        if (PhotonNetwork.InRoom) return "Spawning player...";
+        if (problem != null)
+            return problem;
+        if (PhotonNetwork.InRoom)
+            return "Spawning player...";
 
         switch (PhotonNetwork.NetworkClientState)
         {
@@ -121,7 +146,12 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
         // no blending) at the start of every repaint, otherwise last frame's text stays behind and smears.
         Color previous = GUI.color;
         GUI.color = Color.black;
-        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill, false);
+        GUI.DrawTexture(
+            new Rect(0, 0, Screen.width, Screen.height),
+            Texture2D.whiteTexture,
+            ScaleMode.StretchToFill,
+            false
+        );
         GUI.color = previous;
 
         int size = Mathf.Max(18, Mathf.RoundToInt(Screen.height * 0.04f));
@@ -130,14 +160,14 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
             alignment = TextAnchor.MiddleCenter,
             fontSize = size,
             fontStyle = FontStyle.Bold,
-            wordWrap = true
+            wordWrap = true,
         };
         title.normal.textColor = Color.white;
 
         var small = new GUIStyle(title)
         {
             fontSize = Mathf.Max(12, Mathf.RoundToInt(size * 0.6f)),
-            fontStyle = FontStyle.Normal
+            fontStyle = FontStyle.Normal,
         };
         small.normal.textColor = new Color(1f, 1f, 1f, 0.7f);
 
@@ -147,17 +177,49 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
 
         GUI.Label(new Rect(x, y, w, size * 2.2f), StatusText(), title);
 
-        string detail = problem != null ? "Check your internet connection and the Photon App Id." : "Network: " + PhotonNetwork.NetworkClientState;
+        string detail =
+            problem != null
+                ? "Check your internet connection and the Photon App Id."
+                : "Network: " + PhotonNetwork.NetworkClientState;
         GUI.Label(new Rect(x, y + size * 2.4f, w, size), detail, small);
 
         // after a failure there is a way to try again
         if (problem != null && !PhotonNetwork.IsConnected)
         {
-            var button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.Max(14, Mathf.RoundToInt(size * 0.7f)) };
-            if (GUI.Button(new Rect(Screen.width * 0.5f - 110f, y + size * 4f, 220f, size * 1.8f), "Retry", button))
+            var button = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = Mathf.Max(14, Mathf.RoundToInt(size * 0.7f)),
+            };
+            if (
+                GUI.Button(
+                    new Rect(Screen.width * 0.5f - 110f, y + size * 4f, 220f, size * 1.8f),
+                    "Retry",
+                    button
+                )
+            )
             {
                 problem = null;
                 PhotonNetwork.ConnectUsingSettings();
+            }
+        }
+        
+        if (problem != null)
+        {
+            var back = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = Mathf.Max(14, Mathf.RoundToInt(size * 0.7f)),
+            };
+            if (
+                GUI.Button(
+                    new Rect(Screen.width * 0.5f - 110f, y + size * 6.2f, 220f, size * 1.8f),
+                    "Back to menu",
+                    back
+                )
+            )
+            {
+                if (PhotonNetwork.IsConnected)
+                    PhotonNetwork.Disconnect();
+                SceneManager.LoadScene("Menu");
             }
         }
     }
@@ -166,7 +228,10 @@ public class NetworkManagerPUN : MonoBehaviourPunCallbacks
     void DrawCornerStatus()
     {
         string text = PhotonNetwork.InRoom
-            ? "Room: " + PhotonNetwork.CurrentRoom.Name + "   Players: " + PhotonNetwork.CurrentRoom.PlayerCount
+            ? "Room: "
+                + PhotonNetwork.CurrentRoom.Name
+                + "   Players: "
+                + PhotonNetwork.CurrentRoom.PlayerCount
             : "Network: " + PhotonNetwork.NetworkClientState;
 
         var style = new GUIStyle(GUI.skin.label) { fontSize = 16 };
