@@ -146,6 +146,7 @@ MonoBehaviour:
   - {fileID: 301496154008321245}
   - {fileID: 5366993957681819699}
   - {fileID: 9147517273596715250}
+  - {fileID: 1708723254163485714}
   localOnlyObjects:
   - {fileID: 2413594480237033258}
   - {fileID: 3818189921184905700}
@@ -598,7 +599,6 @@ GameObject:
   m_Component:
   - component: {fileID: 7185616545890746592}
   - component: {fileID: 1676111392931424707}
-  - component: {fileID: 5994439002709600197}
   m_Layer: 0
   m_Name: Eye Left
   m_TagString: MainCamera
@@ -672,14 +672,6 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!81 &5994439002709600197
-AudioListener:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4537525637117207263}
-  m_Enabled: 0
 --- !u!1 &4838268129148965916
 GameObject:
   m_ObjectHideFlags: 0
@@ -1059,7 +1051,6 @@ GameObject:
   m_Component:
   - component: {fileID: 3709023090254737404}
   - component: {fileID: 3095716638895307384}
-  - component: {fileID: 7051095650817450218}
   m_Layer: 0
   m_Name: Eye Right
   m_TagString: MainCamera
@@ -1133,14 +1124,6 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!81 &7051095650817450218
-AudioListener:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6553814349539610177}
-  m_Enabled: 0
 --- !u!1 &7031720629904528002
 GameObject:
   m_ObjectHideFlags: 0
@@ -1155,6 +1138,7 @@ GameObject:
   - component: {fileID: 301496154008321245}
   - component: {fileID: 5366993957681819699}
   - component: {fileID: 5098940038297691265}
+  - component: {fileID: 1708723254163485714}
   m_Layer: 0
   m_Name: Character Head
   m_TagString: Untagged
@@ -1332,6 +1316,14 @@ MonoBehaviour:
   leftKeyLabel: LMB
   rightKeyLabel: RMB
   fontSize: 20
+--- !u!81 &1708723254163485714
+AudioListener:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7031720629904528002}
+  m_Enabled: 0
 --- !u!1 &7189382739259565370
 GameObject:
   m_ObjectHideFlags: 0
