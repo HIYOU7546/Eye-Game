@@ -1,25 +1,31 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using TMPro;
 
 public class HomeMenu : MonoBehaviour
 {
     [Header("Panels")]
-    public GameObject homePanel;            // "Home"
-    public SettingsMenu settingsMenu;       // "Settings"
+    public GameObject homePanel; // "Home"
+    public SettingsMenu settingsMenu; // "Settings"
 
     [Header("Inputs (add two TMP Input Fields to Home)")]
     public TMP_InputField playerNameField;
     public TMP_InputField roomNameField;
+
     [Tooltip("Optional: small text that shows problems like 'Enter a name'")]
     public TMP_Text messageLabel;
 
     [Header("Buttons")]
-    public Button createButton, joinButton, storyButton, settingsButton, closeGameButton;
+    public Button createButton,
+        joinButton,
+        storyButton,
+        settingsButton,
+        closeGameButton;
 
     [Header("Scenes")]
     public string gameSceneName = "TestScene";
+
     [Tooltip("Leave empty while story mode is 'coming soon'")]
     public string storySceneName = "";
 
@@ -52,12 +58,20 @@ public class HomeMenu : MonoBehaviour
         string player = GameSession.Clean(playerNameField.text, 16);
         string room = GameSession.Clean(roomNameField.text, 20);
 
-        if (player.Length == 0) { Say("Enter a player name"); return; }
+        if (player.Length == 0)
+        {
+            Say("Enter a player name");
+            return;
+        }
 
         if (room.Length == 0)
         {
-            if (mode == GameSession.JoinMode.Join) { Say("Enter the name of the room to join"); return; }
-            room = "Room" + Random.Range(1000, 10000);   // Create with no name: make one up
+            if (mode == GameSession.JoinMode.Join)
+            {
+                Say("Enter the name of the room to join");
+                return;
+            }
+            room = "Room" + Random.Range(1000, 10000); // Create with no name: make one up
             roomNameField.text = room;
         }
 
@@ -69,7 +83,11 @@ public class HomeMenu : MonoBehaviour
 
     void OnStory()
     {
-        if (string.IsNullOrEmpty(storySceneName)) { Say("Story mode: coming soon"); return; }
+        if (string.IsNullOrEmpty(storySceneName))
+        {
+            Say("Story mode: coming soon");
+            return;
+        }
         SceneManager.LoadScene(storySceneName);
     }
 
@@ -90,7 +108,9 @@ public class HomeMenu : MonoBehaviour
 
     void Say(string text)
     {
-        if (messageLabel != null) messageLabel.text = text;
-        else Debug.LogWarning(text);
+        if (messageLabel != null)
+            messageLabel.text = text;
+        else
+            Debug.LogWarning(text);
     }
 }
